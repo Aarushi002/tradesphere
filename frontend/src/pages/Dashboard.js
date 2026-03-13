@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
 import { formatINR } from '../utils/currency';
+import PriceChart from '../components/PriceChart';
 
 const API_URL = process.env.REACT_APP_API_URL || 'http://localhost:5000';
 
@@ -48,6 +49,7 @@ export default function Dashboard({ user, onLogout, darkMode, onToggleDarkMode }
   const [tradeLoading, setTradeLoading] = useState(false);
   const [bottomTab, setBottomTab] = useState('Holdings');
   const [searchQuery, setSearchQuery] = useState('');
+  const [candles, setCandles] = useState([]);
 
   useEffect(() => {
     const token = getToken();
@@ -74,6 +76,20 @@ export default function Dashboard({ user, onLogout, darkMode, onToggleDarkMode }
       .then(setFeed)
       .catch(() => setFeed([]));
   }, [portfolio]);
+
+  // Temporary mock data for the price chart (Step 3)
+  useEffect(() => {
+    // In Step 4 we'll replace this with real backend data
+    const now = Math.floor(Date.now() / 1000);
+    const mock = [
+      { time: now - 60 * 5, open: 100, high: 105, low: 98, close: 103 },
+      { time: now - 60 * 4, open: 103, high: 108, low: 101, close: 107 },
+      { time: now - 60 * 3, open: 107, high: 110, low: 104, close: 105 },
+      { time: now - 60 * 2, open: 105, high: 109, low: 103, close: 108 },
+      { time: now - 60 * 1, open: 108, high: 112, low: 107, close: 111 },
+    ];
+    setCandles(mock);
+  }, []);
 
   async function loadComments(postId) {
     const res = await fetch(`${API_URL}/api/social/posts/${postId}/comments`);
@@ -247,10 +263,10 @@ export default function Dashboard({ user, onLogout, darkMode, onToggleDarkMode }
             <div className="flex-1 rounded-lg border border-gray-200 dark:border-slate-700 bg-white dark:bg-slate-800 p-4">
               <div className="mb-2 flex items-center justify-between">
                 <span className="font-medium text-gray-800 dark:text-slate-200">{symbol}</span>
-                <span className="text-xs text-gray-500 dark:text-slate-400">Candlestick chart (placeholder)</span>
+                <span className="text-xs text-gray-500 dark:text-slate-400">Candlestick chart</span>
               </div>
-              <div className="flex h-full min-h-[200px] items-center justify-center rounded bg-gray-50 dark:bg-slate-900 text-gray-400 dark:text-slate-500">
-                Chart area — integrate TradingView or lightweight chart library
+              <div className="h-full min-h-[200px] rounded bg-gray-50 dark:bg-slate-900">
+                <PriceChart data={candles} />
               </div>
             </div>
 

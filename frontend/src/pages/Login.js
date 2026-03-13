@@ -1,9 +1,9 @@
 import { useState } from 'react';
-import Logo from '../assets/Tradesphere_logo.png';
+import Logo from '../assets/only_logo.jpg';
 
 const API_URL = process.env.REACT_APP_API_URL || 'http://localhost:5000';
 
-export default function Login({ onLogin, darkMode, onToggleDarkMode }) {
+export default function Login({ onLogin }) {
   const [isRegister, setIsRegister] = useState(false);
   const [name, setName] = useState('');
   const [email, setEmail] = useState('');
@@ -11,7 +11,7 @@ export default function Login({ onLogin, darkMode, onToggleDarkMode }) {
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
 
-  const candleConfigs = [
+  const bottomCandles = [
     { left: '4%', height: 120, color: 'green', duration: 7, delay: 0 },
     { left: '8%', height: 160, color: 'red', duration: 8.5, delay: -1.2 },
     { left: '12%', height: 140, color: 'green', duration: 7.5, delay: -3.4 },
@@ -29,6 +29,23 @@ export default function Login({ onLogin, darkMode, onToggleDarkMode }) {
     { left: '80%', height: 135, color: 'green', duration: 7.2, delay: -2.6 },
     { left: '86%', height: 195, color: 'red', duration: 10.3, delay: -5.1 },
     { left: '92%', height: 150, color: 'green', duration: 8.4, delay: -3.8 },
+  ];
+
+  const topCandles = [
+    { left: '6%', height: 120, color: 'red', duration: 8.5, delay: -1.5 },
+    { left: '10%', height: 150, color: 'green', duration: 9.2, delay: -3.1 },
+    { left: '18%', height: 170, color: 'red', duration: 10.1, delay: -4.6 },
+    { left: '24%', height: 140, color: 'green', duration: 8.7, delay: -2.4 },
+    { left: '30%', height: 160, color: 'red', duration: 9.6, delay: -5.3 },
+    { left: '36%', height: 135, color: 'green', duration: 7.9, delay: -1.8 },
+    { left: '42%', height: 175, color: 'red', duration: 10.4, delay: -3.9 },
+    { left: '48%', height: 145, color: 'green', duration: 8.3, delay: -5.7 },
+    { left: '54%', height: 165, color: 'red', duration: 9.8, delay: -2.9 },
+    { left: '60%', height: 130, color: 'green', duration: 7.6, delay: -4.2 },
+    { left: '68%', height: 180, color: 'red', duration: 10.6, delay: -6.1 },
+    { left: '74%', height: 150, color: 'green', duration: 8.9, delay: -3.5 },
+    { left: '80%', height: 170, color: 'red', duration: 9.9, delay: -5.0 },
+    { left: '88%', height: 140, color: 'green', duration: 8.1, delay: -2.2 },
   ];
 
   async function handleSubmit(e) {
@@ -59,7 +76,7 @@ export default function Login({ onLogin, darkMode, onToggleDarkMode }) {
     <div className="relative min-h-screen flex flex-col items-center justify-center bg-slate-950 px-4 overflow-hidden">
       {/* Animated candlestick background */}
       <div className="candles-bg">
-        {candleConfigs.map((candle, idx) => (
+        {bottomCandles.map((candle, idx) => (
           <div
             key={idx}
             className={`candles-bg__candle ${
@@ -74,15 +91,22 @@ export default function Login({ onLogin, darkMode, onToggleDarkMode }) {
             }}
           />
         ))}
+        {topCandles.map((candle, idx) => (
+          <div
+            key={`top-${idx}`}
+            className={`candles-bg__candle candles-bg__candle--top ${
+              candle.color === 'green' ? 'candles-bg__candle--green' : 'candles-bg__candle--red'
+            }`}
+            style={{
+              left: candle.left,
+              height: `${candle.height}px`,
+              top: '-70px',
+              animationDuration: `${candle.duration}s`,
+              animationDelay: `${candle.delay}s`,
+            }}
+          />
+        ))}
       </div>
-      <button
-        type="button"
-        onClick={onToggleDarkMode}
-        className="absolute top-4 right-4 z-20 p-2 rounded-lg bg-slate-800/80 text-slate-100 hover:bg-slate-700"
-        aria-label={darkMode ? 'Switch to light mode' : 'Switch to dark mode'}
-      >
-        {darkMode ? '☀️' : '🌙'}
-      </button>
       <div className="relative z-10 w-full max-w-md rounded-2xl border border-slate-700/70 bg-slate-900/85 backdrop-blur-xl p-8 shadow-[0_18px_45px_rgba(0,0,0,0.6)]">
         <div className="flex flex-col items-center mb-6">
           <img

@@ -38,6 +38,11 @@ code {
   animation-iteration-count: infinite;
 }
 
+.candles-bg__candle--top {
+  transform-origin: center top;
+  animation-name: float-candle-top;
+}
+
 .candles-bg__candle::before {
   content: '';
   position: absolute;
@@ -83,6 +88,27 @@ code {
   }
   100% {
     transform: translateY(40px) scaleY(0.7);
+    opacity: 0;
+  }
+}
+
+@keyframes float-candle-top {
+  0% {
+    transform: translateY(-40px) scaleY(0.8);
+    opacity: 0;
+  }
+  15% {
+    opacity: 0.5;
+  }
+  50% {
+    transform: translateY(40px) scaleY(1.1);
+    opacity: 0.9;
+  }
+  85% {
+    opacity: 0.4;
+  }
+  100% {
+    transform: translateY(-20px) scaleY(0.7);
     opacity: 0;
   }
 }
