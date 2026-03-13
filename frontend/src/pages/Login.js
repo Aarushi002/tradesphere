@@ -16,55 +16,71 @@ export default function Login({ onLogin }) {
   useEffect(() => {
     const full1 = 'TradeSphere by GammaFlowCapital';
     const full2 = 'Your Strategy Lab for the Stock Market';
+
     let idx1 = 0;
     let idx2 = 0;
+    let phase = 'line1';
+    let timer;
 
-    const typeLine1 = () => {
-      if (idx1 <= full1.length) {
-        setHeroLine1(full1.slice(0, idx1));
-        idx1 += 1;
-      } else {
-        clearInterval(timer1);
-        timer2 = setInterval(typeLine2, 55);
+    const tick = () => {
+      if (phase === 'line1') {
+        if (idx1 <= full1.length) {
+          setHeroLine1(full1.slice(0, idx1));
+          idx1 += 1;
+        } else {
+          phase = 'line2';
+          idx2 = 0;
+        }
+      } else if (phase === 'line2') {
+        if (idx2 <= full2.length) {
+          setHeroLine2(full2.slice(0, idx2));
+          idx2 += 1;
+        } else {
+          phase = 'pause';
+          setTimeout(() => {
+            idx1 = 0;
+            idx2 = 0;
+            setHeroLine1('');
+            setHeroLine2('');
+            phase = 'line1';
+          }, 2200);
+        }
       }
     };
 
-    const typeLine2 = () => {
-      if (idx2 <= full2.length) {
-        setHeroLine2(full2.slice(0, idx2));
-        idx2 += 1;
-      } else {
-        clearInterval(timer2);
-      }
-    };
-
-    let timer2;
-    const timer1 = setInterval(typeLine1, 65);
+    timer = setInterval(tick, 65);
 
     return () => {
-      clearInterval(timer1);
-      if (timer2) clearInterval(timer2);
+      if (timer) clearInterval(timer);
     };
   }, []);
 
   const bottomCandles = [
-    { left: '4%', height: 120, color: 'green', duration: 7, delay: 0 },
-    { left: '8%', height: 160, color: 'red', duration: 8.5, delay: -1.2 },
-    { left: '12%', height: 140, color: 'green', duration: 7.5, delay: -3.4 },
-    { left: '16%', height: 180, color: 'red', duration: 9.5, delay: -2.1 },
-    { left: '20%', height: 150, color: 'green', duration: 8.2, delay: -4.7 },
-    { left: '26%', height: 170, color: 'red', duration: 10, delay: -1.8 },
-    { left: '32%', height: 130, color: 'green', duration: 7.8, delay: -5.3 },
-    { left: '38%', height: 190, color: 'red', duration: 10.5, delay: -3.9 },
-    { left: '44%', height: 160, color: 'green', duration: 8.7, delay: -6.1 },
-    { left: '50%', height: 175, color: 'red', duration: 9.8, delay: -2.9 },
-    { left: '56%', height: 145, color: 'green', duration: 7.4, delay: -4.2 },
-    { left: '62%', height: 185, color: 'red', duration: 9.9, delay: -5.8 },
-    { left: '68%', height: 155, color: 'green', duration: 8.1, delay: -3.5 },
-    { left: '74%', height: 165, color: 'red', duration: 9.1, delay: -6.4 },
-    { left: '80%', height: 135, color: 'green', duration: 7.2, delay: -2.6 },
-    { left: '86%', height: 195, color: 'red', duration: 10.3, delay: -5.1 },
-    { left: '92%', height: 150, color: 'green', duration: 8.4, delay: -3.8 },
+    { left: '2%', height: 110, color: 'green', duration: 7, delay: 0 },
+    { left: '6%', height: 150, color: 'red', duration: 8.5, delay: -1.1 },
+    { left: '10%', height: 135, color: 'green', duration: 7.4, delay: -2.2 },
+    { left: '14%', height: 170, color: 'red', duration: 9.5, delay: -3.3 },
+    { left: '18%', height: 145, color: 'green', duration: 8.1, delay: -4.4 },
+    { left: '22%', height: 165, color: 'red', duration: 9.8, delay: -5.5 },
+    { left: '26%', height: 130, color: 'green', duration: 7.6, delay: -1.7 },
+    { left: '30%', height: 190, color: 'red', duration: 10.6, delay: -2.8 },
+    { left: '34%', height: 160, color: 'green', duration: 8.7, delay: -3.9 },
+    { left: '38%', height: 175, color: 'red', duration: 9.9, delay: -5.0 },
+    { left: '42%', height: 140, color: 'green', duration: 7.3, delay: -6.1 },
+    { left: '46%', height: 185, color: 'red', duration: 10.2, delay: -2.4 },
+    { left: '50%', height: 155, color: 'green', duration: 8.4, delay: -3.5 },
+    { left: '54%', height: 170, color: 'red', duration: 9.4, delay: -4.6 },
+    { left: '58%', height: 135, color: 'green', duration: 7.1, delay: -5.7 },
+    { left: '62%', height: 180, color: 'red', duration: 10.1, delay: -1.9 },
+    { left: '66%', height: 150, color: 'green', duration: 8.2, delay: -3.0 },
+    { left: '70%', height: 165, color: 'red', duration: 9.3, delay: -4.1 },
+    { left: '74%', height: 140, color: 'green', duration: 7.5, delay: -5.2 },
+    { left: '78%', height: 175, color: 'red', duration: 10.4, delay: -6.3 },
+    { left: '82%', height: 145, color: 'green', duration: 8.0, delay: -2.6 },
+    { left: '86%', height: 195, color: 'red', duration: 10.8, delay: -3.7 },
+    { left: '90%', height: 155, color: 'green', duration: 8.6, delay: -4.8 },
+    { left: '94%', height: 170, color: 'red', duration: 9.7, delay: -5.9 },
+    { left: '98%', height: 140, color: 'green', duration: 7.8, delay: -1.3 },
   ];
 
   const topCandles = [
@@ -82,6 +98,7 @@ export default function Login({ onLogin }) {
     { left: '74%', height: 150, color: 'green', duration: 8.9, delay: -3.5 },
     { left: '80%', height: 170, color: 'red', duration: 9.9, delay: -5.0 },
     { left: '88%', height: 140, color: 'green', duration: 8.1, delay: -2.2 },
+    { left: '94%', height: 160, color: 'red', duration: 9.3, delay: -3.6 },
   ];
 
   async function handleSubmit(e) {
@@ -146,17 +163,14 @@ export default function Login({ onLogin }) {
       {/* Left hero area */}
       <div className="relative z-10 hidden lg:flex flex-1 flex-col justify-center pr-10 text-slate-50">
         <div className="flex items-center gap-4 mb-6">
-          <div className="flex h-14 w-14 items-center justify-center rounded-2xl bg-emerald-500/10 ring-2 ring-emerald-400/40 shadow-[0_0_45px_rgba(16,185,129,0.7)]">
+          <div className="relative h-16 w-16 overflow-hidden rounded-2xl bg-gradient-to-br from-emerald-500/25 via-emerald-400/20 to-sky-500/15 shadow-[0_0_55px_rgba(16,185,129,0.75)] ring-1 ring-emerald-400/40 backdrop-blur">
             <img
               src={Logo}
               alt="TradeSphere mark"
-              className="h-10 w-10 object-contain drop-shadow-[0_0_30px_rgba(16,185,129,0.9)]"
+              className="absolute inset-0 h-full w-full object-cover mix-blend-screen opacity-90"
             />
           </div>
           <div>
-            <p className="text-xs font-semibold tracking-[0.22em] text-emerald-300/90">
-              TRADING RESEARCH PLATFORM
-            </p>
             <p className="text-lg font-semibold text-slate-100">
               Trade<span className="text-emerald-400">Sphere</span>
             </p>
@@ -172,12 +186,14 @@ export default function Login({ onLogin }) {
           </p>
         </div>
       </div>
-      {/* Right auth card */}
-      <div className="relative z-10 w-full max-w-md lg:max-w-sm rounded-2xl border border-slate-800/80 bg-slate-950/85 backdrop-blur-xl p-8 shadow-[0_22px_55px_rgba(0,0,0,0.7)] lg:ml-16">
-        <h2 className="text-lg font-semibold text-slate-100 mb-4 text-center">
-          {isRegister ? 'Create your account' : 'Log in to your account'}
-        </h2>
-        <form onSubmit={handleSubmit}>
+      {/* Right side: two-column panel for symmetry */}
+      <div className="relative z-10 w-full max-w-3xl lg:flex lg:items-stretch lg:ml-12">
+        {/* Auth card */}
+        <div className="w-full lg:w-1/2 rounded-2xl border border-slate-800/80 bg-slate-950/85 backdrop-blur-xl p-8 shadow-[0_22px_55px_rgba(0,0,0,0.7)] mb-6 lg:mb-0 lg:mr-4">
+          <h2 className="text-lg font-semibold text-slate-100 mb-4 text-center">
+            {isRegister ? 'Create your account' : 'Log in to your account'}
+          </h2>
+          <form onSubmit={handleSubmit}>
           {isRegister && (
             <div className="mb-3">
               <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">Name</label>
@@ -220,12 +236,30 @@ export default function Login({ onLogin }) {
             {loading ? '...' : isRegister ? 'Sign up' : 'Log in'}
           </button>
         </form>
-        <p className="mt-4 text-sm text-slate-600 dark:text-slate-400">
+        <p className="mt-4 text-sm text-slate-400">
           {isRegister ? 'Already have an account?' : "Don't have an account?"}{' '}
-          <button type="button" onClick={() => setIsRegister(!isRegister)} className="text-sky-600 dark:text-sky-400 font-medium hover:underline">
+          <button type="button" onClick={() => setIsRegister(!isRegister)} className="text-sky-400 font-medium hover:underline">
             {isRegister ? 'Log in' : 'Sign up'}
           </button>
         </p>
+        </div>
+        {/* Secondary info card for symmetry */}
+        <div className="w-full lg:w-1/2 rounded-2xl border border-slate-900/80 bg-slate-950/70 backdrop-blur-xl p-6 shadow-[0_18px_45px_rgba(0,0,0,0.5)] flex flex-col justify-between text-slate-100">
+          <div>
+            <h3 className="text-base font-semibold mb-2 text-emerald-300">Why TradeSphere?</h3>
+            <p className="text-sm text-slate-300/90 mb-3">
+              Simulated trading, clean analytics, and a playground to test your ideas before risking real capital.
+            </p>
+            <ul className="space-y-1 text-sm text-slate-300/80 list-disc list-inside">
+              <li>Paper trade strategies and track performance</li>
+              <li>Visualize positions and P&amp;L in one place</li>
+              <li>Collaborate by sharing ideas with your circle</li>
+            </ul>
+          </div>
+          <p className="mt-4 text-xs text-slate-500">
+            Built for learners, quants, and curious investors.
+          </p>
+        </div>
       </div>
     </div>
   );
