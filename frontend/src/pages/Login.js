@@ -126,7 +126,7 @@ export default function Login({ onLogin }) {
   }
 
   return (
-    <div className="relative min-h-screen flex items-stretch justify-center bg-slate-950 px-6 md:px-12 overflow-hidden">
+    <div className="relative min-h-screen flex items-stretch justify-between bg-slate-950 px-6 md:px-12 lg:px-16 overflow-hidden">
       {/* Animated candlestick background */}
       <div className="candles-bg">
         {bottomCandles.map((candle, idx) => (
@@ -160,10 +160,10 @@ export default function Login({ onLogin }) {
           />
         ))}
       </div>
-      {/* Left hero area */}
-      <div className="relative z-10 hidden lg:flex flex-1 flex-col justify-center pr-10 text-slate-50">
-        <div className="flex items-center gap-4 mb-6">
-          <div className="relative h-16 w-16 overflow-hidden rounded-2xl bg-gradient-to-br from-emerald-500/25 via-emerald-400/20 to-sky-500/15 shadow-[0_0_55px_rgba(16,185,129,0.75)] ring-1 ring-emerald-400/40 backdrop-blur">
+      {/* Left hero area - takes up space with large text */}
+      <div className="relative z-10 hidden lg:flex flex-1 flex-col justify-center min-w-0 max-w-[55%] pr-8 xl:pr-12 text-slate-50">
+        <div className="flex items-center gap-5 mb-8">
+          <div className="relative h-20 w-20 shrink-0 overflow-hidden rounded-2xl bg-gradient-to-br from-emerald-500/25 via-emerald-400/20 to-sky-500/15 shadow-[0_0_55px_rgba(16,185,129,0.75)] ring-1 ring-emerald-400/40 backdrop-blur">
             <img
               src={Logo}
               alt="TradeSphere mark"
@@ -171,25 +171,24 @@ export default function Login({ onLogin }) {
             />
           </div>
           <div>
-            <p className="text-lg font-semibold text-slate-100">
+            <p className="text-xl font-semibold text-slate-100">
               Trade<span className="text-emerald-400">Sphere</span>
             </p>
           </div>
         </div>
         <div className="max-w-xl">
-          <p className="text-3xl font-semibold md:text-4xl tracking-tight text-slate-50 mb-3">
+          <p className="text-4xl md:text-5xl xl:text-6xl font-bold tracking-tight text-slate-50 mb-4 leading-tight">
             {heroLine1}
-            <span className="inline-block w-3 h-6 align-middle bg-emerald-400/80 animate-pulse ml-1" />
+            <span className="inline-block w-1.5 h-8 xl:h-10 align-middle bg-emerald-400/90 animate-pulse ml-1" />
           </p>
-          <p className="text-lg md:text-xl text-slate-300/90">
+          <p className="text-xl md:text-2xl xl:text-3xl text-slate-300/95 font-medium">
             {heroLine2}
           </p>
         </div>
       </div>
-      {/* Right side: two-column panel for symmetry */}
-      <div className="relative z-10 w-full max-w-3xl lg:flex lg:items-stretch lg:ml-12">
-        {/* Auth card */}
-        <div className="w-full lg:w-1/2 rounded-2xl border border-slate-800/80 bg-slate-950/85 backdrop-blur-xl p-8 shadow-[0_22px_55px_rgba(0,0,0,0.7)] mb-6 lg:mb-0 lg:mr-4">
+      {/* Right side: login card - takes up space */}
+      <div className="relative z-10 w-full flex-shrink-0 lg:w-[420px] xl:w-[460px] flex items-center justify-center py-8 lg:py-12">
+        <div className="w-full min-h-[420px] flex flex-col justify-center rounded-2xl border border-slate-800/80 bg-slate-950/85 backdrop-blur-xl p-8 xl:p-10 shadow-[0_22px_55px_rgba(0,0,0,0.7)]">
           <h2 className="text-lg font-semibold text-slate-100 mb-4 text-center">
             {isRegister ? 'Create your account' : 'Log in to your account'}
           </h2>
@@ -242,23 +241,6 @@ export default function Login({ onLogin }) {
             {isRegister ? 'Log in' : 'Sign up'}
           </button>
         </p>
-        </div>
-        {/* Secondary info card for symmetry */}
-        <div className="w-full lg:w-1/2 rounded-2xl border border-slate-900/80 bg-slate-950/70 backdrop-blur-xl p-6 shadow-[0_18px_45px_rgba(0,0,0,0.5)] flex flex-col justify-between text-slate-100">
-          <div>
-            <h3 className="text-base font-semibold mb-2 text-emerald-300">Why TradeSphere?</h3>
-            <p className="text-sm text-slate-300/90 mb-3">
-              Simulated trading, clean analytics, and a playground to test your ideas before risking real capital.
-            </p>
-            <ul className="space-y-1 text-sm text-slate-300/80 list-disc list-inside">
-              <li>Paper trade strategies and track performance</li>
-              <li>Visualize positions and P&amp;L in one place</li>
-              <li>Collaborate by sharing ideas with your circle</li>
-            </ul>
-          </div>
-          <p className="mt-4 text-xs text-slate-500">
-            Built for learners, quants, and curious investors.
-          </p>
         </div>
       </div>
     </div>

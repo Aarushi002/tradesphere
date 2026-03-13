@@ -29,9 +29,9 @@ code {
 
 .candles-bg__candle {
   position: absolute;
-  width: 4px;
+  width: 5px;
   border-radius: 999px;
-  opacity: 0.4;
+  opacity: 0.55;
   transform-origin: center bottom;
   animation-name: float-candle;
   animation-timing-function: ease-in-out;
@@ -73,42 +73,42 @@ code {
 
 @keyframes float-candle {
   0% {
-    transform: translateY(20px) scaleY(0.8);
-    opacity: 0;
+    transform: translateY(60px) scaleY(0.7);
+    opacity: 0.2;
   }
-  15% {
-    opacity: 0.5;
+  25% {
+    opacity: 0.7;
   }
   50% {
-    transform: translateY(-40px) scaleY(1.1);
-    opacity: 0.9;
+    transform: translateY(-80px) scaleY(1.15);
+    opacity: 0.95;
   }
-  85% {
-    opacity: 0.4;
+  75% {
+    opacity: 0.6;
   }
   100% {
-    transform: translateY(40px) scaleY(0.7);
-    opacity: 0;
+    transform: translateY(80px) scaleY(0.65);
+    opacity: 0.2;
   }
 }
 
 @keyframes float-candle-top {
   0% {
-    transform: translateY(-40px) scaleY(0.8);
-    opacity: 0;
+    transform: translateY(-60px) scaleY(0.7);
+    opacity: 0.2;
   }
-  15% {
-    opacity: 0.5;
+  25% {
+    opacity: 0.7;
   }
   50% {
-    transform: translateY(40px) scaleY(1.1);
-    opacity: 0.9;
+    transform: translateY(80px) scaleY(1.15);
+    opacity: 0.95;
   }
-  85% {
-    opacity: 0.4;
+  75% {
+    opacity: 0.6;
   }
   100% {
-    transform: translateY(-20px) scaleY(0.7);
-    opacity: 0;
+    transform: translateY(-80px) scaleY(0.65);
+    opacity: 0.2;
   }
 }
