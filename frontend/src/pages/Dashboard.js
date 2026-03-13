@@ -1,9 +1,7 @@
 import { useState, useEffect } from 'react';
-import { PieChart, Pie, Cell, ResponsiveContainer, Tooltip, Legend } from 'recharts';
 import { formatINR } from '../utils/currency';
 
 const API_URL = process.env.REACT_APP_API_URL || 'http://localhost:5000';
-const CHART_COLORS = ['#22c55e', '#3b82f6'];
 
 function getToken() {
   return localStorage.getItem('token');
@@ -39,7 +37,6 @@ const BOTTOM_TABS = ['Orders', 'Positions', 'Holdings', 'P&L'];
 export default function Dashboard({ user, onLogout, darkMode, onToggleDarkMode }) {
   const [portfolio, setPortfolio] = useState(null);
   const [trades, setTrades] = useState([]);
-  const [leaderboard, setLeaderboard] = useState([]);
   const [feed, setFeed] = useState([]);
   const [postContent, setPostContent] = useState('');
   const [postLoading, setPostLoading] = useState(false);
@@ -69,13 +66,6 @@ export default function Dashboard({ user, onLogout, darkMode, onToggleDarkMode }
       .then((res) => res.json())
       .then(setTrades)
       .catch(() => setTrades([]));
-  }, [portfolio]);
-
-  useEffect(() => {
-    fetch(`${API_URL}/api/leaderboard?limit=10`)
-      .then((res) => res.json())
-      .then(setLeaderboard)
-      .catch(() => setLeaderboard([]));
   }, [portfolio]);
 
   useEffect(() => {
