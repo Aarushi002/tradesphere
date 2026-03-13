@@ -160,22 +160,21 @@ export default function Login({ onLogin }) {
           />
         ))}
       </div>
+      {/* Sticky top-left: logo + TradeSphere */}
+      <div className="sticky top-0 left-0 z-20 flex items-center gap-3 px-4 py-3 md:px-6 md:py-4">
+        <div className="relative h-14 w-14 md:h-16 md:w-16 shrink-0 overflow-hidden rounded-2xl bg-gradient-to-br from-emerald-500/25 via-emerald-400/20 to-sky-500/15 shadow-[0_0_40px_rgba(16,185,129,0.6)] ring-1 ring-emerald-400/40 backdrop-blur">
+          <img
+            src={Logo}
+            alt="TradeSphere"
+            className="absolute inset-0 h-full w-full object-cover mix-blend-screen opacity-90"
+          />
+        </div>
+        <p className="text-lg md:text-xl font-semibold text-slate-100">
+          Trade<span className="text-emerald-400">Sphere</span>
+        </p>
+      </div>
       {/* Left hero area - takes up space with large text */}
       <div className="relative z-10 hidden lg:flex flex-1 flex-col justify-center min-w-0 max-w-[55%] pr-8 xl:pr-12 text-slate-50">
-        <div className="flex items-center gap-5 mb-8">
-          <div className="relative h-20 w-20 shrink-0 overflow-hidden rounded-2xl bg-gradient-to-br from-emerald-500/25 via-emerald-400/20 to-sky-500/15 shadow-[0_0_55px_rgba(16,185,129,0.75)] ring-1 ring-emerald-400/40 backdrop-blur">
-            <img
-              src={Logo}
-              alt="TradeSphere mark"
-              className="absolute inset-0 h-full w-full object-cover mix-blend-screen opacity-90"
-            />
-          </div>
-          <div>
-            <p className="text-xl font-semibold text-slate-100">
-              Trade<span className="text-emerald-400">Sphere</span>
-            </p>
-          </div>
-        </div>
         <div className="max-w-xl">
           <p className="text-4xl md:text-5xl xl:text-6xl font-bold tracking-tight text-slate-50 mb-4 leading-tight">
             {heroLine1}
