@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import Logo from '../logo.svg';
+import Logo from '../assets/Tradesphere_logo.png';
 
 const API_URL = process.env.REACT_APP_API_URL || 'http://localhost:5000';
 
@@ -10,6 +10,26 @@ export default function Login({ onLogin, darkMode, onToggleDarkMode }) {
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
+
+  const candleConfigs = [
+    { left: '4%', height: 120, color: 'green', duration: 7, delay: 0 },
+    { left: '8%', height: 160, color: 'red', duration: 8.5, delay: -1.2 },
+    { left: '12%', height: 140, color: 'green', duration: 7.5, delay: -3.4 },
+    { left: '16%', height: 180, color: 'red', duration: 9.5, delay: -2.1 },
+    { left: '20%', height: 150, color: 'green', duration: 8.2, delay: -4.7 },
+    { left: '26%', height: 170, color: 'red', duration: 10, delay: -1.8 },
+    { left: '32%', height: 130, color: 'green', duration: 7.8, delay: -5.3 },
+    { left: '38%', height: 190, color: 'red', duration: 10.5, delay: -3.9 },
+    { left: '44%', height: 160, color: 'green', duration: 8.7, delay: -6.1 },
+    { left: '50%', height: 175, color: 'red', duration: 9.8, delay: -2.9 },
+    { left: '56%', height: 145, color: 'green', duration: 7.4, delay: -4.2 },
+    { left: '62%', height: 185, color: 'red', duration: 9.9, delay: -5.8 },
+    { left: '68%', height: 155, color: 'green', duration: 8.1, delay: -3.5 },
+    { left: '74%', height: 165, color: 'red', duration: 9.1, delay: -6.4 },
+    { left: '80%', height: 135, color: 'green', duration: 7.2, delay: -2.6 },
+    { left: '86%', height: 195, color: 'red', duration: 10.3, delay: -5.1 },
+    { left: '92%', height: 150, color: 'green', duration: 8.4, delay: -3.8 },
+  ];
 
   async function handleSubmit(e) {
     e.preventDefault();
@@ -39,13 +59,21 @@ export default function Login({ onLogin, darkMode, onToggleDarkMode }) {
     <div className="relative min-h-screen flex flex-col items-center justify-center bg-slate-950 px-4 overflow-hidden">
       {/* Animated candlestick background */}
       <div className="candles-bg">
-        <div className="candles-bg__candle candles-bg__candle--green" style={{ left: '8%', height: '110px', bottom: '-40px', animationDuration: '7s', animationDelay: '0s' }} />
-        <div className="candles-bg__candle candles-bg__candle--red" style={{ left: '18%', height: '150px', bottom: '-60px', animationDuration: '9s', animationDelay: '-2s' }} />
-        <div className="candles-bg__candle candles-bg__candle--green" style={{ left: '30%', height: '130px', bottom: '-50px', animationDuration: '8s', animationDelay: '-4s' }} />
-        <div className="candles-bg__candle candles-bg__candle--red" style={{ left: '45%', height: '170px', bottom: '-70px', animationDuration: '10s', animationDelay: '-1s' }} />
-        <div className="candles-bg__candle candles-bg__candle--green" style={{ left: '60%', height: '140px', bottom: '-55px', animationDuration: '7.5s', animationDelay: '-3s' }} />
-        <div className="candles-bg__candle candles-bg__candle--red" style={{ left: '72%', height: '120px', bottom: '-45px', animationDuration: '8.5s', animationDelay: '-5s' }} />
-        <div className="candles-bg__candle candles-bg__candle--green" style={{ left: '85%', height: '160px', bottom: '-65px', animationDuration: '9.5s', animationDelay: '-6s' }} />
+        {candleConfigs.map((candle, idx) => (
+          <div
+            key={idx}
+            className={`candles-bg__candle ${
+              candle.color === 'green' ? 'candles-bg__candle--green' : 'candles-bg__candle--red'
+            }`}
+            style={{
+              left: candle.left,
+              height: `${candle.height}px`,
+              bottom: '-70px',
+              animationDuration: `${candle.duration}s`,
+              animationDelay: `${candle.delay}s`,
+            }}
+          />
+        ))}
       </div>
       <button
         type="button"
