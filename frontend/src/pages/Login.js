@@ -43,7 +43,7 @@ export default function Login({ onLogin }) {
             setHeroLine1('');
             setHeroLine2('');
             phase = 'line1';
-          }, 2200);
+          }, 5000);
         }
       }
     };
@@ -119,14 +119,18 @@ export default function Login({ onLogin }) {
       localStorage.setItem('user', JSON.stringify(data.user));
       onLogin(data.user);
     } catch (err) {
-      setError(err.message);
+      const message =
+        err.message === 'Failed to fetch'
+          ? 'Cannot reach the server. Make sure the backend is running (e.g. npm start in the backend folder).'
+          : err.message;
+      setError(message);
     } finally {
       setLoading(false);
     }
   }
 
   return (
-    <div className="relative min-h-screen flex items-stretch justify-between bg-slate-950 px-6 md:px-12 lg:px-16 overflow-hidden">
+    <div className="relative min-h-screen min-h-[100dvh] flex flex-col lg:flex-row items-stretch justify-between bg-slate-950 overflow-x-hidden overflow-y-auto">
       {/* Animated candlestick background */}
       <div className="candles-bg">
         {bottomCandles.map((candle, idx) => (
@@ -160,76 +164,76 @@ export default function Login({ onLogin }) {
           />
         ))}
       </div>
-      {/* Sticky top-left: logo + TradeSphere */}
-      <div className="sticky top-0 left-0 z-20 flex items-center gap-3 px-4 py-3 md:px-6 md:py-4">
-        <div className="relative h-14 w-14 md:h-16 md:w-16 shrink-0 overflow-hidden rounded-2xl bg-gradient-to-br from-emerald-500/25 via-emerald-400/20 to-sky-500/15 shadow-[0_0_40px_rgba(16,185,129,0.6)] ring-1 ring-emerald-400/40 backdrop-blur">
+      {/* Sticky top-left: logo + TradeSphere — full width, no left gap */}
+      <div className="sticky top-0 left-0 right-0 z-20 flex items-center gap-3 pl-4 pr-4 py-3 sm:pl-6 sm:pr-6 md:pl-10 md:pr-10 lg:pl-16 lg:pr-6 lg:py-4 bg-slate-950/90 backdrop-blur-md border-b border-slate-800/50 lg:absolute lg:right-auto lg:top-0 lg:left-0 lg:border-0 lg:bg-transparent lg:backdrop-blur-none w-full lg:w-auto shrink-0">
+        <div className="relative h-12 w-12 sm:h-14 sm:w-14 md:h-16 md:w-16 shrink-0 overflow-hidden rounded-xl md:rounded-2xl bg-gradient-to-br from-emerald-500/25 via-emerald-400/20 to-sky-500/15 shadow-[0_0_40px_rgba(16,185,129,0.6)] ring-1 ring-emerald-400/40 mt-3">
           <img
             src={Logo}
             alt="TradeSphere"
             className="absolute inset-0 h-full w-full object-cover mix-blend-screen opacity-90"
           />
         </div>
-        <p className="text-lg md:text-xl font-semibold text-slate-100">
+        <p className="text-base sm:text-lg md:text-xl font-semibold text-slate-100 -mt-4">
           Trade<span className="text-emerald-400">Sphere</span>
         </p>
       </div>
-      {/* Left hero area - takes up space with large text */}
-      <div className="relative z-10 hidden lg:flex flex-1 flex-col justify-center min-w-0 max-w-[55%] pr-8 xl:pr-12 text-slate-50">
-        <div className="max-w-xl">
-          <p className="text-4xl md:text-5xl xl:text-6xl font-bold tracking-tight text-slate-50 mb-4 leading-tight">
+      {/* Left hero area - visible on tablet/mobile above form, side-by-side on desktop */}
+      <div className="relative z-10 flex flex-1 flex-col justify-center min-w-0 pl-8 pr-4 sm:pl-12 sm:pr-6 md:pl-16 md:pr-10 lg:pl-12 lg:pr-8 xl:pl-16 xl:pr-12 lg:max-w-[55%] text-slate-50 pt-2 pb-6 sm:pt-2 sm:pb-8 lg:pt-0 lg:pb-0 -mt-4 lg:mt-0">
+        <div className="max-w-xl w-full">
+          <p className="text-2xl sm:text-3xl md:text-4xl lg:text-5xl xl:text-6xl font-bold tracking-tight text-slate-50 mb-3 sm:mb-4 leading-tight">
             {heroLine1}
-            <span className="inline-block w-1.5 h-8 xl:h-10 align-middle bg-emerald-400/90 animate-pulse ml-1" />
+            <span className="inline-block w-1.5 h-6 sm:h-8 xl:h-10 align-middle bg-emerald-400/90 animate-pulse ml-1" />
           </p>
-          <p className="text-xl md:text-2xl xl:text-3xl text-slate-300/95 font-medium">
+          <p className="text-base sm:text-lg md:text-xl lg:text-2xl xl:text-3xl text-slate-300/95 font-medium">
             {heroLine2}
           </p>
         </div>
       </div>
-      {/* Right side: login card - takes up space */}
-      <div className="relative z-10 w-full flex-shrink-0 lg:w-[420px] xl:w-[460px] flex items-center justify-center py-8 lg:py-12">
-        <div className="w-full min-h-[420px] flex flex-col justify-center rounded-2xl border border-slate-800/80 bg-slate-950/85 backdrop-blur-xl p-8 xl:p-10 shadow-[0_22px_55px_rgba(0,0,0,0.7)]">
-          <h2 className="text-lg font-semibold text-slate-100 mb-4 text-center">
+      {/* Right side: login card */}
+      <div className="relative z-10 w-full flex-shrink-0 lg:w-[420px] xl:w-[460px] flex items-center justify-center px-4 sm:px-6 md:px-10 lg:px-0 lg:mr-6 xl:mr-10 py-6 sm:py-8 lg:py-12 pb-10 sm:pb-12">
+        <div className="w-full max-w-md mx-auto min-h-0 flex flex-col justify-center rounded-2xl border border-slate-800/80 bg-slate-950/85 backdrop-blur-xl p-6 sm:p-8 xl:p-10 shadow-[0_22px_55px_rgba(0,0,0,0.7)]">
+          <h2 className="text-base sm:text-lg font-semibold text-slate-100 mb-4 text-center">
             {isRegister ? 'Create your account' : 'Log in to your account'}
           </h2>
           <form onSubmit={handleSubmit}>
           {isRegister && (
             <div className="mb-3">
-              <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">Name</label>
+              <label className="block text-sm font-medium text-slate-300 mb-1">Name</label>
               <input
                 type="text"
                 value={name}
                 onChange={(e) => setName(e.target.value)}
                 required
-                className="w-full rounded-lg border border-slate-300 dark:border-slate-500 bg-white dark:bg-slate-700 text-slate-900 dark:text-slate-100 px-3 py-2 focus:ring-2 focus:ring-sky-500 focus:border-sky-500"
+                className="w-full rounded-lg border border-slate-600 bg-slate-800/80 text-slate-100 px-3 py-2.5 sm:py-2 text-base focus:ring-2 focus:ring-sky-500 focus:border-sky-500"
               />
             </div>
           )}
           <div className="mb-3">
-            <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">Email</label>
+            <label className="block text-sm font-medium text-slate-300 mb-1">Email</label>
             <input
               type="email"
               value={email}
               onChange={(e) => setEmail(e.target.value)}
               required
-              className="w-full rounded-lg border border-slate-300 dark:border-slate-500 bg-white dark:bg-slate-700 text-slate-900 dark:text-slate-100 px-3 py-2 focus:ring-2 focus:ring-sky-500 focus:border-sky-500"
+              className="w-full rounded-lg border border-slate-600 bg-slate-800/80 text-slate-100 px-3 py-2.5 sm:py-2 text-base focus:ring-2 focus:ring-sky-500 focus:border-sky-500"
             />
           </div>
           <div className="mb-4">
-            <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">Password</label>
+            <label className="block text-sm font-medium text-slate-300 mb-1">Password</label>
             <input
               type="password"
               value={password}
               onChange={(e) => setPassword(e.target.value)}
               required
               minLength={6}
-              className="w-full rounded-lg border border-slate-300 dark:border-slate-500 bg-white dark:bg-slate-700 text-slate-900 dark:text-slate-100 px-3 py-2 focus:ring-2 focus:ring-sky-500 focus:border-sky-500"
+              className="w-full rounded-lg border border-slate-600 bg-slate-800/80 text-slate-100 px-3 py-2.5 sm:py-2 text-base focus:ring-2 focus:ring-sky-500 focus:border-sky-500"
             />
           </div>
-          {error && <p className="text-red-600 dark:text-red-400 mb-3 text-sm">{error}</p>}
+          {error && <p className="text-red-400 mb-3 text-sm leading-snug">{error}</p>}
           <button
             type="submit"
             disabled={loading}
-            className="w-full rounded-lg bg-sky-600 hover:bg-sky-700 dark:bg-sky-500 dark:hover:bg-sky-600 text-white font-medium py-2.5 disabled:opacity-50"
+            className="w-full rounded-lg bg-sky-600 hover:bg-sky-700 text-white font-medium py-3 sm:py-2.5 disabled:opacity-50 min-h-[44px] sm:min-h-0"
           >
             {loading ? '...' : isRegister ? 'Sign up' : 'Log in'}
           </button>

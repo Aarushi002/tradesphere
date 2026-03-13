@@ -62,10 +62,18 @@ const PriceChart = ({ data }) => {
     };
   }, []);
 
-  // Whenever data changes, update the series
+  // Whenever data changes, update the series and fit view to remove empty space
   useEffect(() => {
-    if (!seriesRef.current || !data || data.length === 0) return;
+    if (!seriesRef.current || !chartRef.current || !data || data.length === 0) return;
     seriesRef.current.setData(data);
+    // Fit time scale to the actual data range so no empty space on left/right
+    requestAnimationFrame(() => {
+      if (chartRef.current) {
+        try {
+          chartRef.current.timeScale().fitContent();
+        } catch (_) {}
+      }
+    });
   }, [data]);
 
   return (

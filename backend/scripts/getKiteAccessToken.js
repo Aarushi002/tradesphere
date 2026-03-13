@@ -1,14 +1,18 @@
 import dotenv from 'dotenv';
+import path from 'path';
+import { fileURLToPath } from 'url';
 import { KiteConnect } from 'kiteconnect';
 
-dotenv.config();
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+dotenv.config({ path: path.join(__dirname, '..', '.env') });
 
-const apiKey = process.env.KITE_API_KEY;
-const apiSecret = process.env.KITE_API_SECRET;
-const requestToken = process.argv[2];
+const apiKey = (process.env.KITE_API_KEY || '').trim();
+const apiSecret = (process.env.KITE_API_SECRET || '').trim();
+const requestToken = (process.argv[2] || '').trim();
 
 if (!apiKey || !apiSecret || !requestToken) {
   console.error('Usage: node scripts/getKiteAccessToken.js <request_token>');
+  console.error('Ensure backend/.env has: KITE_API_KEY=... and KITE_API_SECRET=... (no quotes, no spaces around =)');
   process.exit(1);
 }
 
@@ -21,6 +25,9 @@ kc.generateSession(requestToken, apiSecret)
     process.exit(0);
   })
   .catch((err) => {
-    console.error('Error generating session:', err);
+    console.error('Error generating session:', err?.message || err);
+    if (String(err?.message || err).includes('api_key') || String(err?.data || '').includes('api_key')) {
+      console.error('\nTip: Use the API KEY from Kite (not the secret). In .env use: KITE_API_KEY=your_key and KITE_API_SECRET=your_secret. No quotes, no spaces.');
+    }
     process.exit(1);
   });

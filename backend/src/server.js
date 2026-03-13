@@ -1,7 +1,7 @@
+import './loadEnv.js';
 import express from 'express';
 import cors from 'cors';
 import morgan from 'morgan';
-import dotenv from 'dotenv';
 import mongoose from 'mongoose';
 import authRoutes from '../routes/auth.js';
 import tradesRoutes from '../routes/trades.js';
@@ -10,8 +10,7 @@ import stocksRoutes from '../routes/stocks.js';
 import leaderboardRoutes from '../routes/leaderboard.js';
 import socialRoutes from '../routes/social.js';
 import marketRoutes from '../routes/market.js';
-
-dotenv.config();
+import kiteRoutes from '../routes/kite.js';
 
 const app = express();
 
@@ -30,6 +29,7 @@ app.use('/api/stocks', stocksRoutes);
 app.use('/api/leaderboard', leaderboardRoutes);
 app.use('/api/social', socialRoutes);
 app.use('/api/market', marketRoutes);
+app.use('/api/kite', kiteRoutes);
 
 const PORT = process.env.PORT || 5000;
 const MONGO_URI = process.env.MONGO_URI || 'mongodb://localhost:27017/tradesphere';
