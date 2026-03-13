@@ -12,7 +12,9 @@ const userSchema = new mongoose.Schema(
   { timestamps: true }
 );
 
-userSchema.pre('save', async function (next) {
+// Use promise-based middleware (no next arg) to avoid
+// \"next is not a function\" issues with async hooks.
+userSchema.pre('save', async function () {
   if (this.isModified('password')) {
     this.password = await bcrypt.hash(this.password, 10);
   }
@@ -20,7 +22,6 @@ userSchema.pre('save', async function (next) {
     const count = await mongoose.model('User').countDocuments();
     this.tradingId = `PT${String(100000 + count).padStart(6, '0')}`;
   }
-  next?.();
 });
 
 userSchema.methods.comparePassword = function (candidate) {
