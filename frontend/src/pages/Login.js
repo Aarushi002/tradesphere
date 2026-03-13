@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import Logo from '../assets/only_logo.jpg';
 
 const API_URL = process.env.REACT_APP_API_URL || 'http://localhost:5000';
@@ -10,6 +10,42 @@ export default function Login({ onLogin }) {
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
+  const [heroLine1, setHeroLine1] = useState('');
+  const [heroLine2, setHeroLine2] = useState('');
+
+  useEffect(() => {
+    const full1 = 'TradeSphere by GammaFlowCapital';
+    const full2 = 'Your Strategy Lab for the Stock Market';
+    let idx1 = 0;
+    let idx2 = 0;
+
+    const typeLine1 = () => {
+      if (idx1 <= full1.length) {
+        setHeroLine1(full1.slice(0, idx1));
+        idx1 += 1;
+      } else {
+        clearInterval(timer1);
+        timer2 = setInterval(typeLine2, 55);
+      }
+    };
+
+    const typeLine2 = () => {
+      if (idx2 <= full2.length) {
+        setHeroLine2(full2.slice(0, idx2));
+        idx2 += 1;
+      } else {
+        clearInterval(timer2);
+      }
+    };
+
+    let timer2;
+    const timer1 = setInterval(typeLine1, 65);
+
+    return () => {
+      clearInterval(timer1);
+      if (timer2) clearInterval(timer2);
+    };
+  }, []);
 
   const bottomCandles = [
     { left: '4%', height: 120, color: 'green', duration: 7, delay: 0 },
@@ -73,7 +109,7 @@ export default function Login({ onLogin }) {
   }
 
   return (
-    <div className="relative min-h-screen flex flex-col items-center justify-center bg-slate-950 px-4 overflow-hidden">
+    <div className="relative min-h-screen flex items-stretch justify-center bg-slate-950 px-6 md:px-12 overflow-hidden">
       {/* Animated candlestick background */}
       <div className="candles-bg">
         {bottomCandles.map((candle, idx) => (
@@ -107,20 +143,37 @@ export default function Login({ onLogin }) {
           />
         ))}
       </div>
-      <div className="relative z-10 w-full max-w-md rounded-2xl border border-slate-700/70 bg-slate-900/85 backdrop-blur-xl p-8 shadow-[0_18px_45px_rgba(0,0,0,0.6)]">
-        <div className="flex flex-col items-center mb-6">
-          <img
-            src={Logo}
-            alt="TradeSphere"
-            className="h-16 w-auto mb-3 drop-shadow-[0_0_35px_rgba(34,197,94,0.6)]"
-          />
-          <h1 className="text-2xl font-bold tracking-tight text-slate-50 mt-0">
-            Trade<span className="text-emerald-400">Sphere</span>
-          </h1>
-          <p className="text-xs font-medium uppercase tracking-[0.18em] text-emerald-300/80 mt-1">
-            by GammaFlowCapital
+      {/* Left hero area */}
+      <div className="relative z-10 hidden lg:flex flex-1 flex-col justify-center pr-10 text-slate-50">
+        <div className="flex items-center gap-4 mb-6">
+          <div className="flex h-14 w-14 items-center justify-center rounded-2xl bg-emerald-500/10 ring-2 ring-emerald-400/40 shadow-[0_0_45px_rgba(16,185,129,0.7)]">
+            <img
+              src={Logo}
+              alt="TradeSphere mark"
+              className="h-10 w-10 object-contain drop-shadow-[0_0_30px_rgba(16,185,129,0.9)]"
+            />
+          </div>
+          <div>
+            <p className="text-xs font-semibold tracking-[0.22em] text-emerald-300/90">
+              TRADING RESEARCH PLATFORM
+            </p>
+            <p className="text-lg font-semibold text-slate-100">
+              Trade<span className="text-emerald-400">Sphere</span>
+            </p>
+          </div>
+        </div>
+        <div className="max-w-xl">
+          <p className="text-3xl font-semibold md:text-4xl tracking-tight text-slate-50 mb-3">
+            {heroLine1}
+            <span className="inline-block w-3 h-6 align-middle bg-emerald-400/80 animate-pulse ml-1" />
+          </p>
+          <p className="text-lg md:text-xl text-slate-300/90">
+            {heroLine2}
           </p>
         </div>
+      </div>
+      {/* Right auth card */}
+      <div className="relative z-10 w-full max-w-md lg:max-w-sm rounded-2xl border border-slate-800/80 bg-slate-950/85 backdrop-blur-xl p-8 shadow-[0_22px_55px_rgba(0,0,0,0.7)] lg:ml-16">
         <h2 className="text-lg font-semibold text-slate-100 mb-4 text-center">
           {isRegister ? 'Create your account' : 'Log in to your account'}
         </h2>

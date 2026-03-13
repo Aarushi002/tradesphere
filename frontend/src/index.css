@@ -22,8 +22,8 @@ code {
   inset: 0;
   overflow: hidden;
   pointer-events: none;
-  background: radial-gradient(circle at top, rgba(56, 189, 248, 0.18), transparent 55%),
-              radial-gradient(circle at bottom, rgba(16, 185, 129, 0.18), transparent 55%),
+  background: radial-gradient(circle at top left, rgba(56, 189, 248, 0.22), transparent 55%),
+              radial-gradient(circle at bottom right, rgba(16, 185, 129, 0.22), transparent 55%),
               #020617;
 }
 
