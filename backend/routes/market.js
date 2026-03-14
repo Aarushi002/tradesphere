@@ -500,4 +500,50 @@ router.get('/candles', async (req, res) => {
   }
 });
 
+// GET /api/market/market-depth?symbol=RELIANCE (or NSE:RELIANCE)
+// Returns order book (bid/ask depth) from Kite getQuote. Depth has 5 levels each for buy and sell.
+router.get('/market-depth', async (req, res) => {
+  try {
+    const raw = (req.query.symbol || '').toString().trim();
+    if (!raw) {
+      return res.status(400).json({ error: 'symbol is required (e.g. RELIANCE or NSE:RELIANCE)' });
+    }
+    if (!apiKey || !accessToken) {
+      return res.status(503).json({
+        error: 'Market data unavailable',
+        message: 'Set KITE_API_KEY and KITE_ACCESS_TOKEN in backend .env for live market depth.',
+      });
+    }
+    const key = raw.includes(':') ? raw : toKiteInstrumentKey(raw);
+    if (!key) {
+      return res.status(400).json({ error: 'Could not resolve instrument key' });
+    }
+    const kc = getKite();
+    const response = await kc.getQuote([key]);
+    const quote = response && response[key];
+    if (!quote || !quote.depth) {
+      return res.json({
+        symbol: raw,
+        buy: [],
+        sell: [],
+        message: 'No depth data. Try during market hours or check symbol.',
+      });
+    }
+    const buyRaw = quote.depth.buy || [];
+    const sellRaw = quote.depth.sell || [];
+    const buy = buyRaw.slice(0, 5).map((b) => ({ price: Number(b?.price) || 0, quantity: Number(b?.quantity) || 0, orders: Number(b?.orders) || 0 }));
+    const sell = sellRaw.slice(0, 5).map((s) => ({ price: Number(s?.price) || 0, quantity: Number(s?.quantity) || 0, orders: Number(s?.orders) || 0 }));
+    res.json({
+      symbol: raw,
+      buy,
+      sell,
+    });
+  } catch (err) {
+    console.error('Error fetching market depth', err?.message || err);
+    res.status(500).json({
+      error: err?.message || 'Failed to fetch market depth',
+    });
+  }
+});
+
 export default router;

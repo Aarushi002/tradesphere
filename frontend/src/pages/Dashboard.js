@@ -199,6 +199,8 @@ export default function Dashboard({ user, onLogout, darkMode, onToggleDarkMode }
   const [optionChainLoading, setOptionChainLoading] = useState(false);
   const [optionChainExpiry, setOptionChainExpiry] = useState(null); // YYYY-MM-DD or null for server default
   const [marketDepthSymbol, setMarketDepthSymbol] = useState(null);
+  const [marketDepthData, setMarketDepthData] = useState(null);
+  const [marketDepthLoading, setMarketDepthLoading] = useState(false);
   const [watchlistChangeType, setWatchlistChangeType] = useState('close'); // 'close' | 'open'
   const [watchlistShow, setWatchlistShow] = useState({ priceChange: true, priceChangePct: true, priceDirection: true, holdings: false, notes: false, groupColors: false });
   const [watchlistSortBy, setWatchlistSortBy] = useState('LTP'); // '%' | 'LTP' | 'A-Z' | 'EXCH'
@@ -235,6 +237,21 @@ export default function Dashboard({ user, onLogout, darkMode, onToggleDarkMode }
       .catch((err) => setOptionChainData({ error: err.message, chain: [], expiries: [] }))
       .finally(() => setOptionChainLoading(false));
   }, [optionChainSymbol, optionChainExpiry]);
+
+  useEffect(() => {
+    if (!marketDepthSymbol) {
+      setMarketDepthData(null);
+      return;
+    }
+    const sym = marketDepthSymbol.includes(':') ? marketDepthSymbol : marketDepthSymbol;
+    setMarketDepthLoading(true);
+    setMarketDepthData(null);
+    fetch(`${API_URL}/api/market/market-depth?symbol=${encodeURIComponent(sym)}`)
+      .then((res) => res.json())
+      .then((data) => setMarketDepthData(data))
+      .catch((err) => setMarketDepthData({ error: err.message, buy: [], sell: [] }))
+      .finally(() => setMarketDepthLoading(false));
+  }, [marketDepthSymbol]);
 
   function fetchPortfolio() {
     const token = getToken();
@@ -1337,11 +1354,11 @@ export default function Dashboard({ user, onLogout, darkMode, onToggleDarkMode }
                     <table className="w-full text-xs sm:text-sm min-w-[360px]">
                       <thead>
                         <tr className="border-b border-gray-200 dark:border-slate-600">
-                          <th className="text-left py-2 pr-2">Call OI (L)</th>
-                          <th className="text-left py-2 pr-2">Call LTP</th>
-                          <th className="text-left py-2 pr-2 font-medium">Strike</th>
-                          <th className="text-left py-2 pr-2">Put LTP</th>
-                          <th className="text-left py-2">Put OI (L)</th>
+                          <th className="text-left py-2 pr-2 cursor-help" title="Call open interest in lakhs — total outstanding call option contracts">Call OI (L)</th>
+                          <th className="text-left py-2 pr-2 cursor-help" title="Call last traded price — latest price at which the call option was traded">Call LTP</th>
+                          <th className="text-left py-2 pr-2 font-medium cursor-help" title="Strike price — the price at which the option can be exercised">Strike</th>
+                          <th className="text-left py-2 pr-2 cursor-help" title="Put last traded price — latest price at which the put option was traded">Put LTP</th>
+                          <th className="text-left py-2 cursor-help" title="Put open interest in lakhs — total outstanding put option contracts">Put OI (L)</th>
                         </tr>
                       </thead>
                       <tbody>
@@ -1388,24 +1405,43 @@ export default function Dashboard({ user, onLogout, darkMode, onToggleDarkMode }
               <table className="w-full text-sm">
                 <thead>
                   <tr className="border-b border-gray-200 dark:border-slate-600 text-gray-600 dark:text-slate-400">
-                    <th className="text-left py-2">Bid Qty</th>
-                    <th className="text-left py-2">Bid</th>
-                    <th className="text-left py-2">Ask</th>
-                    <th className="text-left py-2">Ask Qty</th>
+                    <th className="text-left py-2 cursor-help" title="Total quantity of buy orders at this price level (number of shares or contracts bid)">Bid Qty</th>
+                    <th className="text-left py-2 cursor-help" title="Bid price — the price at which buyers are willing to buy">Bid</th>
+                    <th className="text-left py-2 cursor-help" title="Ask price — the price at which sellers are willing to sell">Ask</th>
+                    <th className="text-left py-2 cursor-help" title="Total quantity of sell orders at this price level (number of shares or contracts offered)">Ask Qty</th>
                   </tr>
                 </thead>
                 <tbody>
-                  {[5, 4, 3, 2, 1].map((i) => (
-                    <tr key={i} className="border-b border-gray-100 dark:border-slate-700">
-                      <td className="py-1.5 text-green-600 dark:text-green-400">—</td>
-                      <td className="py-1.5 text-green-600 dark:text-green-400">—</td>
-                      <td className="py-1.5 text-red-600 dark:text-red-400">—</td>
-                      <td className="py-1.5 text-red-600 dark:text-red-400">—</td>
-                    </tr>
-                  ))}
+                  {marketDepthLoading ? (
+                    <tr><td colSpan={4} className="py-6 text-center text-gray-500 dark:text-slate-400">Loading market depth…</td></tr>
+                  ) : marketDepthData?.error ? (
+                    <tr><td colSpan={4} className="py-4 text-amber-600 dark:text-amber-400 text-center">{marketDepthData.error}</td></tr>
+                  ) : (() => {
+                    const buy = marketDepthData?.buy || [];
+                    const sell = marketDepthData?.sell || [];
+                    const rows = Math.max(buy.length, sell.length, 5);
+                    if (rows === 0) {
+                      return (
+                        <tr><td colSpan={4} className="py-4 text-gray-500 dark:text-slate-400 text-center">No depth data. Connect Kite and try during market hours.</td></tr>
+                      );
+                    }
+                    return Array.from({ length: rows }, (_, i) => (
+                      <tr key={i} className="border-b border-gray-100 dark:border-slate-700">
+                        <td className="py-1.5 text-green-600 dark:text-green-400">{buy[i]?.quantity != null && buy[i].quantity > 0 ? Number(buy[i].quantity).toLocaleString('en-IN') : '—'}</td>
+                        <td className="py-1.5 text-green-600 dark:text-green-400">{buy[i]?.price != null && buy[i].price > 0 ? Number(buy[i].price).toFixed(2) : '—'}</td>
+                        <td className="py-1.5 text-red-600 dark:text-red-400">{sell[i]?.price != null && sell[i].price > 0 ? Number(sell[i].price).toFixed(2) : '—'}</td>
+                        <td className="py-1.5 text-red-600 dark:text-red-400">{sell[i]?.quantity != null && sell[i].quantity > 0 ? Number(sell[i].quantity).toLocaleString('en-IN') : '—'}</td>
+                      </tr>
+                    ));
+                  })()}
                 </tbody>
               </table>
-              <p className="mt-2 text-xs text-gray-500 dark:text-slate-500">Connect Kite for live market depth (order book).</p>
+              {marketDepthData && !marketDepthData.error && (marketDepthData.buy?.length > 0 || marketDepthData.sell?.length > 0) && (
+                <p className="mt-2 text-xs text-gray-500 dark:text-slate-500">Live order book from Kite. Updates on each open.</p>
+              )}
+              {marketDepthData && !marketDepthData.error && (!marketDepthData.buy?.length && !marketDepthData.sell?.length) && marketDepthData.message && (
+                <p className="mt-2 text-xs text-gray-500 dark:text-slate-500">{marketDepthData.message}</p>
+              )}
             </div>
           </div>
         </div>
