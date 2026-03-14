@@ -838,7 +838,7 @@ export default function Dashboard({ user, onLogout, darkMode, onToggleDarkMode }
                   <div className="flex items-center gap-0.5 opacity-100 sm:opacity-0 sm:group-hover:opacity-100 flex-shrink-0" onClick={(e) => e.stopPropagation()}>
                     <button type="button" onClick={() => { setSymbol(s); setMainNav('dashboard'); setSidebarOpen(false); }} className="p-1.5 sm:p-1 rounded bg-green-600 text-white hover:bg-green-700 touch-manipulation min-w-[28px]" title="Buy">▲</button>
                     <button type="button" onClick={() => { setSymbol(s); setMainNav('dashboard'); setSidebarOpen(false); }} className="p-1.5 sm:p-1 rounded bg-red-600 text-white hover:bg-red-700 touch-manipulation min-w-[28px]" title="Sell">▼</button>
-                    <button type="button" onClick={() => { setMarketDepthSymbol(s); setWatchlistOptionsOpen(null); setSidebarOpen(false); }} className="p-1.5 sm:p-1 rounded border border-gray-300 dark:border-slate-600 bg-white dark:bg-slate-700 hover:bg-gray-100 dark:hover:bg-slate-600 touch-manipulation min-w-[28px]" title="Market Depth">≡</button>
+                    <button type="button" onClick={() => { setMarketDepthSymbol(s); setWatchlistOptionsOpen(null); setSidebarOpen(false); }} className="p-1.5 sm:p-1 rounded border border-gray-300 dark:border-slate-600 bg-white dark:bg-slate-700 hover:bg-gray-100 dark:hover:bg-slate-600 touch-manipulation min-w-[28px]" title="Market Depth (D)">≡</button>
                     <button type="button" onClick={() => { setSymbol(s); setWatchlistOptionsOpen(null); setMainNav('dashboard'); setSidebarOpen(false); }} className="p-1.5 sm:p-1 rounded border border-gray-300 dark:border-slate-600 bg-white dark:bg-slate-700 hover:bg-gray-100 dark:hover:bg-slate-600 touch-manipulation min-w-[28px]" title="Chart">📈</button>
                     <button type="button" onClick={() => removeFromWatchlist(s)} className="p-1.5 sm:p-1 rounded border border-gray-300 dark:border-slate-600 bg-white dark:bg-slate-700 hover:bg-red-100 dark:hover:bg-red-900/30 text-red-600 touch-manipulation min-w-[28px]" title="Delete">🗑</button>
                     <div className="relative">
@@ -847,7 +847,7 @@ export default function Dashboard({ user, onLogout, darkMode, onToggleDarkMode }
                         <div className={`absolute left-0 top-full mt-0.5 z-30 min-w-[160px] py-1 rounded border shadow-lg ${darkMode ? 'bg-slate-800 border-slate-600' : 'bg-white border-gray-200'}`}>
                           <button type="button" onClick={() => { setOptionChainExpiry(null); setOptionChainSymbol(s); setWatchlistOptionsOpen(null); }} className="w-full text-left px-3 py-1.5 text-xs hover:bg-gray-100 dark:hover:bg-slate-700">Option chain</button>
                           <button type="button" onClick={() => { setMarketDepthSymbol(s); setWatchlistOptionsOpen(null); }} className="w-full text-left px-3 py-1.5 text-xs hover:bg-gray-100 dark:hover:bg-slate-700">Market depth</button>
-                          <button type="button" onClick={() => { setSymbol(s); setWatchlistOptionsOpen(null); setMainNav('dashboard'); }} className="w-full text-left px-3 py-1.5 text-xs hover:bg-gray-100 dark:hover:bg-slate-700">Chart</button>
+                          <button type="button" onClick={() => { setSymbol(s); setWatchlistOptionsOpen(null); setMainNav('dashboard'); setSidebarOpen(false); }} className="w-full text-left px-3 py-1.5 text-xs hover:bg-gray-100 dark:hover:bg-slate-700">Chart</button>
                           <button type="button" className="w-full text-left px-3 py-1.5 text-xs hover:bg-gray-100 dark:hover:bg-slate-700">Create alert / ATO</button>
                           <button type="button" className="w-full text-left px-3 py-1.5 text-xs hover:bg-gray-100 dark:hover:bg-slate-700">Notes</button>
                           <button type="button" className="w-full text-left px-3 py-1.5 text-xs hover:bg-gray-100 dark:hover:bg-slate-700">Fundamentals</button>
@@ -1402,45 +1402,105 @@ export default function Dashboard({ user, onLogout, darkMode, onToggleDarkMode }
               <button type="button" onClick={() => setMarketDepthSymbol(null)} className="p-2 rounded hover:bg-gray-100 dark:hover:bg-slate-700 touch-manipulation">×</button>
             </div>
             <div className="p-3 sm:p-4 overflow-x-auto">
-              <table className="w-full text-sm">
-                <thead>
-                  <tr className="border-b border-gray-200 dark:border-slate-600 text-gray-600 dark:text-slate-400">
-                    <th className="text-left py-2 cursor-help" title="Total quantity of buy orders at this price level (number of shares or contracts bid)">Bid Qty</th>
-                    <th className="text-left py-2 cursor-help" title="Bid price — the price at which buyers are willing to buy">Bid</th>
-                    <th className="text-left py-2 cursor-help" title="Ask price — the price at which sellers are willing to sell">Ask</th>
-                    <th className="text-left py-2 cursor-help" title="Total quantity of sell orders at this price level (number of shares or contracts offered)">Ask Qty</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {marketDepthLoading ? (
-                    <tr><td colSpan={4} className="py-6 text-center text-gray-500 dark:text-slate-400">Loading market depth…</td></tr>
-                  ) : marketDepthData?.error ? (
-                    <tr><td colSpan={4} className="py-4 text-amber-600 dark:text-amber-400 text-center">{marketDepthData.error}</td></tr>
-                  ) : (() => {
-                    const buy = marketDepthData?.buy || [];
-                    const sell = marketDepthData?.sell || [];
-                    const rows = Math.max(buy.length, sell.length, 5);
-                    if (rows === 0) {
-                      return (
-                        <tr><td colSpan={4} className="py-4 text-gray-500 dark:text-slate-400 text-center">No depth data. Connect Kite and try during market hours.</td></tr>
-                      );
-                    }
-                    return Array.from({ length: rows }, (_, i) => (
-                      <tr key={i} className="border-b border-gray-100 dark:border-slate-700">
-                        <td className="py-1.5 text-green-600 dark:text-green-400">{buy[i]?.quantity != null && buy[i].quantity > 0 ? Number(buy[i].quantity).toLocaleString('en-IN') : '—'}</td>
-                        <td className="py-1.5 text-green-600 dark:text-green-400">{buy[i]?.price != null && buy[i].price > 0 ? Number(buy[i].price).toFixed(2) : '—'}</td>
-                        <td className="py-1.5 text-red-600 dark:text-red-400">{sell[i]?.price != null && sell[i].price > 0 ? Number(sell[i].price).toFixed(2) : '—'}</td>
-                        <td className="py-1.5 text-red-600 dark:text-red-400">{sell[i]?.quantity != null && sell[i].quantity > 0 ? Number(sell[i].quantity).toLocaleString('en-IN') : '—'}</td>
+              {marketDepthLoading ? (
+                <div className="py-6 text-center text-gray-500 dark:text-slate-400">Loading market depth…</div>
+              ) : marketDepthData?.error ? (
+                <div className="py-4 px-4 text-center">
+                  <p className="text-amber-600 dark:text-amber-400 font-medium">{marketDepthData.error}</p>
+                  {marketDepthData.message && (
+                    <p className="mt-2 text-sm text-gray-500 dark:text-slate-400 max-w-md mx-auto">{marketDepthData.message}</p>
+                  )}
+                </div>
+              ) : (
+                <>
+                  {/* OHLC card + day range bar (real data from Kite) */}
+                  {marketDepthData?.ohlc && (
+                    <div className={`mb-4 rounded-lg border p-4 ${darkMode ? 'bg-slate-800/50 border-slate-600' : 'bg-gray-50 border-gray-200'}`}>
+                      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 text-sm">
+                        <div>
+                          <p className="text-xs text-gray-500 dark:text-slate-400 mb-0.5">Open</p>
+                          <p className="font-medium text-gray-900 dark:text-slate-100">{(marketDepthData.ohlc?.open ?? marketDepthData.last_price ?? 0).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</p>
+                        </div>
+                        <div>
+                          <p className="text-xs text-gray-500 dark:text-slate-400 mb-0.5">Low</p>
+                          <p className="font-medium text-red-600 dark:text-red-400">{(marketDepthData.ohlc?.low ?? 0).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</p>
+                        </div>
+                        <div>
+                          <p className="text-xs text-gray-500 dark:text-slate-400 mb-0.5">Prev. Close</p>
+                          <p className="font-medium text-gray-900 dark:text-slate-100">{(marketDepthData.ohlc?.close ?? 0).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</p>
+                        </div>
+                        <div>
+                          <p className="text-xs text-gray-500 dark:text-slate-400 mb-0.5">High</p>
+                          <p className="font-medium text-green-600 dark:text-green-400">{(marketDepthData.ohlc?.high ?? 0).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</p>
+                        </div>
+                      </div>
+                      {/* Day range bar: low ---- [current] ---- high */}
+                      {marketDepthData.ohlc && Number(marketDepthData.ohlc.high) > Number(marketDepthData.ohlc.low) && (
+                        <div className="mt-3">
+                          <div className="h-2 rounded-full bg-gray-200 dark:bg-slate-600 overflow-hidden relative flex">
+                            <div
+                              className="absolute top-0 bottom-0 bg-red-500 dark:bg-red-500 rounded-full"
+                              style={{
+                                left: 0,
+                                width: '100%',
+                              }}
+                            />
+                            <div
+                              className="absolute top-0 bottom-0 w-1 bg-gray-700 dark:bg-slate-300 rounded-full -translate-x-1/2"
+                              style={{
+                                left: `${Math.min(100, Math.max(0, ((Number(marketDepthData.last_price) || Number(marketDepthData.ohlc.close)) - Number(marketDepthData.ohlc.low)) / (Number(marketDepthData.ohlc.high) - Number(marketDepthData.ohlc.low)) * 100))}%`,
+                              }}
+                              title={`LTP ${(marketDepthData.last_price ?? marketDepthData.ohlc.close).toFixed(2)}`}
+                            />
+                          </div>
+                          <div className="flex justify-between text-xs text-gray-500 dark:text-slate-400 mt-1">
+                            <span>Low {Number(marketDepthData.ohlc.low).toLocaleString('en-IN', { minimumFractionDigits: 2 })}</span>
+                            <span>LTP {(marketDepthData.last_price ?? marketDepthData.ohlc.close).toLocaleString('en-IN', { minimumFractionDigits: 2 })}</span>
+                            <span>High {Number(marketDepthData.ohlc.high).toLocaleString('en-IN', { minimumFractionDigits: 2 })}</span>
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  )}
+
+                  <p className="text-xs font-medium text-gray-500 dark:text-slate-400 mb-2">Order book</p>
+                  <table className="w-full text-sm">
+                    <thead>
+                      <tr className="border-b border-gray-200 dark:border-slate-600 text-gray-600 dark:text-slate-400">
+                        <th className="text-left py-2 cursor-help" title="Total quantity of buy orders at this price level (number of shares or contracts bid)">Bid Qty</th>
+                        <th className="text-left py-2 cursor-help" title="Bid price — the price at which buyers are willing to buy">Bid</th>
+                        <th className="text-left py-2 cursor-help" title="Ask price — the price at which sellers are willing to sell">Ask</th>
+                        <th className="text-left py-2 cursor-help" title="Total quantity of sell orders at this price level (number of shares or contracts offered)">Ask Qty</th>
                       </tr>
-                    ));
-                  })()}
-                </tbody>
-              </table>
-              {marketDepthData && !marketDepthData.error && (marketDepthData.buy?.length > 0 || marketDepthData.sell?.length > 0) && (
-                <p className="mt-2 text-xs text-gray-500 dark:text-slate-500">Live order book from Kite. Updates on each open.</p>
-              )}
-              {marketDepthData && !marketDepthData.error && (!marketDepthData.buy?.length && !marketDepthData.sell?.length) && marketDepthData.message && (
-                <p className="mt-2 text-xs text-gray-500 dark:text-slate-500">{marketDepthData.message}</p>
+                    </thead>
+                    <tbody>
+                      {(() => {
+                        const buy = marketDepthData?.buy || [];
+                        const sell = marketDepthData?.sell || [];
+                        const rows = Math.max(buy.length, sell.length, 5);
+                        if (rows === 0 && !marketDepthData?.ohlc && marketDepthData?.last_price == null) {
+                          return (
+                            <tr><td colSpan={4} className="py-4 text-gray-500 dark:text-slate-400 text-center">No depth data. Connect Kite and try during market hours.</td></tr>
+                          );
+                        }
+                        return Array.from({ length: rows }, (_, i) => (
+                          <tr key={i} className="border-b border-gray-100 dark:border-slate-700">
+                            <td className="py-1.5 text-green-600 dark:text-green-400">{buy[i]?.quantity != null && buy[i].quantity > 0 ? Number(buy[i].quantity).toLocaleString('en-IN') : '—'}</td>
+                            <td className="py-1.5 text-green-600 dark:text-green-400">{buy[i]?.price != null && buy[i].price > 0 ? Number(buy[i].price).toFixed(2) : '—'}</td>
+                            <td className="py-1.5 text-red-600 dark:text-red-400">{sell[i]?.price != null && sell[i].price > 0 ? Number(sell[i].price).toFixed(2) : '—'}</td>
+                            <td className="py-1.5 text-red-600 dark:text-red-400">{sell[i]?.quantity != null && sell[i].quantity > 0 ? Number(sell[i].quantity).toLocaleString('en-IN') : '—'}</td>
+                          </tr>
+                        ));
+                      })()}
+                    </tbody>
+                  </table>
+                  {marketDepthData && !marketDepthData.error && (marketDepthData.buy?.length > 0 || marketDepthData.sell?.length > 0) && (
+                    <p className="mt-2 text-xs text-gray-500 dark:text-slate-500">Live order book from Kite. Updates on each open.</p>
+                  )}
+                  {marketDepthData && !marketDepthData.error && (!marketDepthData.buy?.length && !marketDepthData.sell?.length) && marketDepthData.message && (
+                    <p className="mt-2 text-xs text-gray-500 dark:text-slate-500">{marketDepthData.message}</p>
+                  )}
+                </>
               )}
             </div>
           </div>

@@ -521,22 +521,33 @@ router.get('/market-depth', async (req, res) => {
     const kc = getKite();
     const response = await kc.getQuote([key]);
     const quote = response && response[key];
-    if (!quote || !quote.depth) {
+    if (!quote) {
       return res.json({
         symbol: raw,
         buy: [],
         sell: [],
-        message: 'No depth data. Try during market hours or check symbol.',
+        ohlc: null,
+        last_price: null,
+        message: 'No quote data. Try during market hours or check symbol.',
       });
     }
-    const buyRaw = quote.depth.buy || [];
-    const sellRaw = quote.depth.sell || [];
+    const buyRaw = (quote.depth && quote.depth.buy) || [];
+    const sellRaw = (quote.depth && quote.depth.sell) || [];
     const buy = buyRaw.slice(0, 5).map((b) => ({ price: Number(b?.price) || 0, quantity: Number(b?.quantity) || 0, orders: Number(b?.orders) || 0 }));
     const sell = sellRaw.slice(0, 5).map((s) => ({ price: Number(s?.price) || 0, quantity: Number(s?.quantity) || 0, orders: Number(s?.orders) || 0 }));
+    const ohlc = quote.ohlc ? {
+      open: Number(quote.ohlc.open) || 0,
+      high: Number(quote.ohlc.high) || 0,
+      low: Number(quote.ohlc.low) || 0,
+      close: Number(quote.ohlc.close) || 0, // prev close
+    } : null;
+    const lastPrice = Number(quote.last_price) || (ohlc && ohlc.close) || null;
     res.json({
       symbol: raw,
       buy,
       sell,
+      ohlc,
+      last_price: lastPrice,
     });
   } catch (err) {
     console.error('Error fetching market depth', err?.message || err);
