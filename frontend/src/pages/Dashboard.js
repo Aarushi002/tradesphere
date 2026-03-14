@@ -170,7 +170,6 @@ export default function Dashboard({ user, onLogout, darkMode, onToggleDarkMode }
   const [findInstrumentModalOpen, setFindInstrumentModalOpen] = useState(false);
   const [findInstrumentQuery, setFindInstrumentQuery] = useState('');
   const [findInstrumentSuggestions, setFindInstrumentSuggestions] = useState([]);
-  const [findInstrumentTotal, setFindInstrumentTotal] = useState(0);
   const [findInstrumentLoading, setFindInstrumentLoading] = useState(false);
   const findInstrumentSearchRef = useRef(null);
   const [kitePositions, setKitePositions] = useState([]);
@@ -253,7 +252,6 @@ export default function Dashboard({ user, onLogout, darkMode, onToggleDarkMode }
     const q = (findInstrumentQuery || '').trim();
     if (q.length < 1) {
       setFindInstrumentSuggestions([]);
-      setFindInstrumentTotal(0);
       return;
     }
     setFindInstrumentLoading(true);
@@ -262,9 +260,8 @@ export default function Dashboard({ user, onLogout, darkMode, onToggleDarkMode }
         .then((res) => res.ok ? res.json() : Promise.reject())
         .then((json) => {
           setFindInstrumentSuggestions(json.suggestions || []);
-          setFindInstrumentTotal(json.total != null ? json.total : (json.suggestions || []).length);
         })
-        .catch(() => { setFindInstrumentSuggestions([]); setFindInstrumentTotal(0); })
+        .catch(() => { setFindInstrumentSuggestions([]); })
         .finally(() => setFindInstrumentLoading(false));
     }, 250);
     return () => clearTimeout(t);
@@ -295,7 +292,7 @@ export default function Dashboard({ user, onLogout, darkMode, onToggleDarkMode }
     const qk = symbol.includes(':') ? symbol.split(':')[1] : (symbol === 'NIFTY 50' ? 'NIFTY 50' : symbol === 'NIFTY BANK' ? 'NIFTY BANK' : symbol);
     const ltp = quotes[qk]?.lastPrice ?? quotes[qk]?.value;
     if (ltp != null) setOrderPrice(String(ltp));
-  }, [orderModalOpen, symbol]);
+  }, [orderModalOpen, symbol, quotes]);
 
   function fetchPortfolio() {
     const token = getToken();
@@ -506,7 +503,11 @@ export default function Dashboard({ user, onLogout, darkMode, onToggleDarkMode }
     })
       .then(async (res) => {
         const json = await res.json();
-        if (!res.ok) throw { status: res.status, message: json?.error || json?.message || 'Failed to fetch' };
+        if (!res.ok) {
+          const err = new Error(json?.error || json?.message || 'Failed to fetch');
+          err.status = res.status;
+          throw err;
+        }
         return json;
       })
       .then((json) => {
@@ -521,7 +522,9 @@ export default function Dashboard({ user, onLogout, darkMode, onToggleDarkMode }
           setCandles(data);
           setChartError('');
         } else {
-          throw { status: 0, message: json?.error || 'No data' };
+          const err = new Error(json?.error || 'No data');
+          err.status = 0;
+          throw err;
         }
       })
       .catch((err) => {
