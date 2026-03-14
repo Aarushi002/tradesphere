@@ -22,7 +22,11 @@ app.get('/api/health', (req, res) => {
   res.json({ status: 'ok', service: 'tradesphere-backend' });
 });
 
-// Register Kite callback on the main app first so it always matches (avoids 404 on Render etc.)
+app.get('/api/test', (req, res) => {
+  res.send('API is working');
+});
+
+// GET /api/kite/callback — must be GET; Zerodha redirects the browser here with request_token
 app.get('/api/kite/callback', handleKiteCallback);
 
 app.use('/api/auth', authRoutes);
