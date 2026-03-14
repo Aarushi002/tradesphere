@@ -333,13 +333,23 @@ router.get('/quotes', async (req, res) => {
       const q = quoteList[i] || quoteList.find((r) => r && toYahooSymbol(key) === r.symbol);
       if (!q || q.regularMarketPrice == null) continue;
       const lastPrice = Number(q.regularMarketPrice);
-      const prevClose = Number(q.regularMarketPreviousClose ?? q.previousClose ?? lastPrice);
-      const netChange = Number.isFinite(prevClose) ? lastPrice - prevClose : 0;
-      const changePercent = prevClose && prevClose !== 0 ? (netChange / prevClose) * 100 : 0;
+      // Prefer Yahoo's change fields when present (avoids +0 when prev close equals price)
+      let netChange = q.regularMarketChange != null ? Number(q.regularMarketChange) : null;
+      let changePercent = q.regularMarketChangePercent != null ? Number(q.regularMarketChangePercent) : null;
+      if (netChange == null || changePercent == null) {
+        const prevClose = Number(q.regularMarketPreviousClose ?? q.previousClose ?? lastPrice);
+        if (Number.isFinite(prevClose)) {
+          if (netChange == null) netChange = lastPrice - prevClose;
+          if (changePercent == null && prevClose !== 0) changePercent = (netChange / prevClose) * 100;
+        }
+      }
+      if (changePercent == null) changePercent = 0;
+      // Yahoo may return regularMarketChangePercent as decimal (e.g. -0.31 for -0.31%) or as percent
+      if (changePercent !== 0 && Math.abs(changePercent) < 1.5) changePercent = changePercent * 100;
       data.push({
         name,
         value: lastPrice,
-        change: Math.round(netChange * 100) / 100,
+        change: Math.round((netChange ?? 0) * 100) / 100,
         changePercent: Math.round(changePercent * 100) / 100,
       });
     }
