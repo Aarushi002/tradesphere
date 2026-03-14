@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { formatINR, formatINRCompact } from '../utils/currency';
 import PriceChart from '../components/PriceChart';
 
@@ -6,31 +6,6 @@ const API_URL = process.env.REACT_APP_API_URL || 'http://localhost:5000';
 
 function getToken() {
   return localStorage.getItem('token');
-}
-
-function CommentForm({ postId, onAdd }) {
-  const [text, setText] = useState('');
-  const [loading, setLoading] = useState(false);
-  function handleSubmit(e) {
-    e.preventDefault();
-    if (!text.trim()) return;
-    setLoading(true);
-    onAdd(text);
-    setText('');
-    setLoading(false);
-  }
-  return (
-    <form onSubmit={handleSubmit} className="mt-2 ml-4 flex gap-2">
-      <input
-        placeholder="Add a comment..."
-        value={text}
-        onChange={(e) => setText(e.target.value)}
-        maxLength={500}
-        className="flex-1 rounded border border-gray-300 dark:border-slate-600 dark:bg-slate-700 dark:text-slate-100 px-2 py-1 text-sm"
-      />
-      <button type="submit" disabled={loading} className="rounded bg-gray-200 dark:bg-slate-600 px-2 py-1 text-sm hover:bg-gray-300 dark:hover:bg-slate-500">Reply</button>
-    </form>
-  );
 }
 
 const WATCHLIST_KEY = 'tradesphere_watchlist';
@@ -70,61 +45,50 @@ function saveWatchlistGroups(state) {
   } catch (_) {}
 }
 
-// Deterministic mock candles per symbol so each stock has different chart
-function generateMockCandles(symbol, nowUnix) {
-  let seed = 0;
-  const s = (symbol || '').toUpperCase();
-  for (let i = 0; i < s.length; i++) seed = (seed * 31 + s.charCodeAt(i)) >>> 0;
-  const rand = () => {
-    seed = (seed * 1103515245 + 12345) >>> 0;
-    return (seed >>> 16) / 65536;
-  };
-  const base = 80 + (rand() * 400) | 0;
-  const count = 24;
-  const candles = [];
-  let open = base;
-  for (let i = count; i >= 0; i--) {
-    const time = nowUnix - 60 * 5 * i;
-    const change = (rand() - 0.48) * 8;
-    const close = Math.max(10, open + change);
-    const high = Math.max(open, close) + rand() * 4;
-    const low = Math.min(open, close) - rand() * 4;
-    candles.push({ time, open, high, low, close });
-    open = close;
-  }
-  return candles;
-}
-
 const DEFAULT_WATCHLIST = ['RELIANCE', 'TCS', 'INFY', 'HDFCBANK', 'NIFTY 50'];
 
-// Fallback mock indices when real quotes API is unavailable
-const MOCK_INDICES = [
-  { name: 'NIFTY 50', value: 24120.45, change: -128.50, changePercent: -0.53 },
-  { name: 'SENSEX', value: 79234.12, change: -420.30, changePercent: -0.53 },
-];
+// Zerodha-style display for NFO option tradingsymbol (e.g. NIFTY26031723500CE -> NIFTY 17th w MAR 23500 CE)
+function formatOptionDisplayZerodha(exchange, tradingsymbol) {
+  if ((exchange || '').toUpperCase() !== 'NFO' || !tradingsymbol) return null;
+  const ts = tradingsymbol.toUpperCase();
+  const months = ['JAN', 'FEB', 'MAR', 'APR', 'MAY', 'JUN', 'JUL', 'AUG', 'SEP', 'OCT', 'NOV', 'DEC'];
+  const ordinal = (n) => {
+    const d = n % 10, t = n % 100;
+    if (d === 1 && t !== 11) return n + 'st';
+    if (d === 2 && t !== 12) return n + 'nd';
+    if (d === 3 && t !== 13) return n + 'rd';
+    return n + 'th';
+  };
+  // Weekly (NSE format): UNDERLYING + YY + M + DD + STRIKE + CE/PE. M = 1-9 or O/N/D for Oct/Nov/Dec
+  const weeklyMatch = ts.match(/^(.+?)(\d{2})([1-9OND])(\d{2})(\d+)(CE|PE)$/);
+  if (weeklyMatch) {
+    const [, underlying, , mChar, dd, strike, optType] = weeklyMatch;
+    const monthNum = { '1': 1, '2': 2, '3': 3, '4': 4, '5': 5, '6': 6, '7': 7, '8': 8, '9': 9, 'O': 10, 'N': 11, 'D': 12 }[mChar];
+    const dayNum = parseInt(dd, 10);
+    if (!monthNum || dayNum < 1 || dayNum > 31) return null;
+    const mon = months[monthNum - 1];
+    return `${underlying} ${ordinal(dayNum)} w ${mon} ${strike} ${optType}`;
+  }
+  // Monthly: UNDERLYING + YY + MON + STRIKE + CE/PE
+  const monthlyMatch = ts.match(/^(.+?)(\d{2})(JAN|FEB|MAR|APR|MAY|JUN|JUL|AUG|SEP|OCT|NOV|DEC)(\d+)(CE|PE)$/);
+  if (monthlyMatch) {
+    const [, underlying, yy, mon, strike, optType] = monthlyMatch;
+    return `${underlying} ${yy} ${mon} ${strike} ${optType}`;
+  }
+  return null;
+}
+
+function getSymbolDisplayLabel(key) {
+  if (!key || !key.includes(':')) return key || '';
+  const [ex, sym] = key.split(':');
+  return (ex === 'NFO' && formatOptionDisplayZerodha(ex, sym)) || sym || key;
+}
 
 const INDEX_NAMES = ['NIFTY 50', 'SENSEX'];
-
-// Per-symbol mock last price and change (for watchlist display)
-function getMockQuote(symbol) {
-  let seed = 0;
-  const s = (symbol || '').toUpperCase();
-  for (let i = 0; i < s.length; i++) seed = (seed * 31 + s.charCodeAt(i)) >>> 0;
-  const rand = () => { seed = (seed * 1103515245 + 12345) >>> 0; return (seed >>> 16) / 65536; };
-  const base = 80 + (rand() * 400) | 0;
-  const change = (rand() - 0.5) * 2 * base / 100;
-  const lastPrice = base + change;
-  const changePercent = base ? (change / base * 100) : 0;
-  return { lastPrice: Math.round(lastPrice * 100) / 100, change: Math.round(change * 100) / 100, changePercent: Math.round(changePercent * 100) / 100 };
-}
 
 export default function Dashboard({ user, onLogout, darkMode, onToggleDarkMode }) {
   const [portfolio, setPortfolio] = useState(null);
   const [trades, setTrades] = useState([]);
-  const [feed, setFeed] = useState([]);
-  const [postContent, setPostContent] = useState('');
-  const [postLoading, setPostLoading] = useState(false);
-  const [commentByPost, setCommentByPost] = useState({});
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [symbol, setSymbol] = useState('RELIANCE');
@@ -137,6 +101,25 @@ export default function Dashboard({ user, onLogout, darkMode, onToggleDarkMode }
   const [candles, setCandles] = useState([]);
   const [chartRange, setChartRange] = useState('6d'); // 1d, 6d, 14d, 52w, ytd, 1m, 3m
   const [chartLoading, setChartLoading] = useState(false);
+  const [chartRefreshTick, setChartRefreshTick] = useState(0); // increment every 60s to refetch candles (live chart)
+  const [chartFullScreen, setChartFullScreen] = useState(false); // full-screen chart when opened from watchlist
+  const [chartLtp, setChartLtp] = useState(null); // real-time LTP when in full-screen chart
+  const [orderSide, setOrderSide] = useState(null); // 'BUY' | 'SELL' | null - when set, order panel shows only that action (Zerodha-like)
+  const [orderPanelClosedOnOrdersTab, setOrderPanelClosedOnOrdersTab] = useState(false); // hide order panel on Orders tab when user closes it
+  const [orderModalOpen, setOrderModalOpen] = useState(false); // Zerodha-style popup when clicking B/S from watchlist
+  const [orderModalSide, setOrderModalSide] = useState(null); // 'BUY' | 'SELL' when modal is open
+  const orderPanelRef = useRef(null);
+  // Scroll order panel into view when it opens (after it mounts)
+  useEffect(() => {
+    if (orderSide === null) return;
+    const t = requestAnimationFrame(() => {
+      requestAnimationFrame(() => {
+        orderPanelRef.current?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+      });
+    });
+    return () => cancelAnimationFrame(t);
+  }, [orderSide]);
+
   const [watchlistGroups, setWatchlistGroups] = useState(loadWatchlistGroups);
   const activeGroup = watchlistGroups.groups.find((g) => g.id === watchlistGroups.activeId) || watchlistGroups.groups[0];
   const watchlist = activeGroup ? activeGroup.symbols : [];
@@ -177,8 +160,19 @@ export default function Dashboard({ user, onLogout, darkMode, onToggleDarkMode }
   const [mainNav, setMainNav] = useState('dashboard');
   const [indices, setIndices] = useState([]);
   const [quotes, setQuotes] = useState({});
+  const [quotesFromLiveApi, setQuotesFromLiveApi] = useState(false); // true when last successful quotes response had real data
+  const [quotesApiUnavailable, setQuotesApiUnavailable] = useState(false); // true when backend returns 503 (Kite not configured)
+  const [kiteRefreshMessage, setKiteRefreshMessage] = useState(null); // 'success' | error string after redirect from Kite callback
   const [searchSuggestions, setSearchSuggestions] = useState([]);
+  const [searchSuggestionsTotal, setSearchSuggestionsTotal] = useState(0);
   const [searchSuggestionsOpen, setSearchSuggestionsOpen] = useState(false);
+  const [searchSuggestionsLoadingMore, setSearchSuggestionsLoadingMore] = useState(false);
+  const [findInstrumentModalOpen, setFindInstrumentModalOpen] = useState(false);
+  const [findInstrumentQuery, setFindInstrumentQuery] = useState('');
+  const [findInstrumentSuggestions, setFindInstrumentSuggestions] = useState([]);
+  const [findInstrumentTotal, setFindInstrumentTotal] = useState(0);
+  const [findInstrumentLoading, setFindInstrumentLoading] = useState(false);
+  const findInstrumentSearchRef = useRef(null);
   const [kitePositions, setKitePositions] = useState([]);
   const [kiteOrderLoading, setKiteOrderLoading] = useState(false);
   const [orderProduct, setOrderProduct] = useState('CNC');
@@ -253,6 +247,56 @@ export default function Dashboard({ user, onLogout, darkMode, onToggleDarkMode }
       .finally(() => setMarketDepthLoading(false));
   }, [marketDepthSymbol]);
 
+  // Find instrument modal: fetch suggestions when query changes (modal open)
+  useEffect(() => {
+    if (!findInstrumentModalOpen) return;
+    const q = (findInstrumentQuery || '').trim();
+    if (q.length < 1) {
+      setFindInstrumentSuggestions([]);
+      setFindInstrumentTotal(0);
+      return;
+    }
+    setFindInstrumentLoading(true);
+    const t = setTimeout(() => {
+      fetch(`${API_URL}/api/market/instruments/search?q=${encodeURIComponent(q)}&limit=100&offset=0`)
+        .then((res) => res.ok ? res.json() : Promise.reject())
+        .then((json) => {
+          setFindInstrumentSuggestions(json.suggestions || []);
+          setFindInstrumentTotal(json.total != null ? json.total : (json.suggestions || []).length);
+        })
+        .catch(() => { setFindInstrumentSuggestions([]); setFindInstrumentTotal(0); })
+        .finally(() => setFindInstrumentLoading(false));
+    }, 250);
+    return () => clearTimeout(t);
+  }, [findInstrumentModalOpen, findInstrumentQuery]);
+
+  // Focus find-instrument search when modal opens
+  useEffect(() => {
+    if (findInstrumentModalOpen && findInstrumentSearchRef.current) {
+      findInstrumentSearchRef.current.focus();
+    }
+  }, [findInstrumentModalOpen]);
+
+  // Ctrl+Shift+F to open Find instrument modal
+  useEffect(() => {
+    const onKey = (e) => {
+      if (e.ctrlKey && e.shiftKey && e.key === 'F') {
+        e.preventDefault();
+        setFindInstrumentModalOpen(true);
+      }
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, []);
+
+  // Prefill order price with LTP when opening order modal
+  useEffect(() => {
+    if (!orderModalOpen || !symbol) return;
+    const qk = symbol.includes(':') ? symbol.split(':')[1] : (symbol === 'NIFTY 50' ? 'NIFTY 50' : symbol === 'NIFTY BANK' ? 'NIFTY BANK' : symbol);
+    const ltp = quotes[qk]?.lastPrice ?? quotes[qk]?.value;
+    if (ltp != null) setOrderPrice(String(ltp));
+  }, [orderModalOpen, symbol]);
+
   function fetchPortfolio() {
     const token = getToken();
     if (!token) return;
@@ -283,17 +327,19 @@ export default function Dashboard({ user, onLogout, darkMode, onToggleDarkMode }
     const q = searchQuery.trim();
     if (q.length < 1) {
       setSearchSuggestions([]);
+      setSearchSuggestionsTotal(0);
       setSearchSuggestionsOpen(false);
       return;
     }
     const t = setTimeout(() => {
-      fetch(`${API_URL}/api/market/instruments/search?q=${encodeURIComponent(q)}&limit=1000`)
+      fetch(`${API_URL}/api/market/instruments/search?q=${encodeURIComponent(q)}&limit=1000&offset=0`)
         .then((res) => res.ok ? res.json() : Promise.reject())
         .then((json) => {
           setSearchSuggestions(json.suggestions || []);
+          setSearchSuggestionsTotal(json.total != null ? json.total : (json.suggestions || []).length);
           setSearchSuggestionsOpen(true);
         })
-        .catch(() => setSearchSuggestions([]));
+        .catch(() => { setSearchSuggestions([]); setSearchSuggestionsTotal(0); });
     }, 200);
     return () => clearTimeout(t);
   }, [searchQuery]);
@@ -327,16 +373,36 @@ export default function Dashboard({ user, onLogout, darkMode, onToggleDarkMode }
       .catch(() => setMfOrders([]));
   }, [mainNav]);
 
-  // Fetch real-time quotes for indices and all watchlist symbols (live values)
+  // Fetch real-time quotes for indices and all watchlist symbols (live values from Kite)
   function updateQuotesFromResponse(json) {
     if (!json?.data || !Array.isArray(json.data)) return;
     const data = json.data;
+    setQuotesApiUnavailable(false);
+    setQuotesFromLiveApi(data.length > 0);
     setIndices(data.filter((q) => INDEX_NAMES.includes(q.name)));
     const newQuotes = Object.fromEntries(
       data.map((q) => [q.name, { lastPrice: q.value, change: q.change, changePercent: q.changePercent }])
     );
     setQuotes((prev) => ({ ...prev, ...newQuotes }));
   }
+
+  // After Kite login redirect: show success/error and clean URL
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const refreshed = params.get('kite_refreshed');
+    const err = params.get('kite_error');
+    if (refreshed === '1') {
+      setKiteRefreshMessage('success');
+      setQuotesApiUnavailable(false);
+      window.history.replaceState({}, '', window.location.pathname);
+      const t = setTimeout(() => setKiteRefreshMessage(null), 5000);
+      return () => clearTimeout(t);
+    }
+    if (err) {
+      setKiteRefreshMessage(decodeURIComponent(err));
+      window.history.replaceState({}, '', window.location.pathname);
+    }
+  }, []);
 
   useEffect(() => {
     const symbols = [...INDEX_NAMES];
@@ -346,9 +412,15 @@ export default function Dashboard({ user, onLogout, darkMode, onToggleDarkMode }
     });
     if (symbols.length === 0) return;
     const qs = symbols.map((s) => encodeURIComponent(s)).join(',');
-    fetch(`${API_URL}/api/market/quotes?symbols=${qs}`)
+    const headers = getToken() ? { Authorization: `Bearer ${getToken()}` } : {};
+    fetch(`${API_URL}/api/market/quotes?symbols=${qs}`, { headers })
       .then((res) => {
-        if (!res.ok) throw new Error(res.status === 503 ? 'Quotes unavailable' : 'Failed to fetch quotes');
+        if (res.status === 503) {
+          setQuotesApiUnavailable(true);
+          setQuotesFromLiveApi(false);
+          return res.json().then(() => { throw new Error('Quotes unavailable'); });
+        }
+        if (!res.ok) throw new Error('Failed to fetch quotes');
         return res.json();
       })
       .then(updateQuotesFromResponse)
@@ -357,8 +429,11 @@ export default function Dashboard({ user, onLogout, darkMode, onToggleDarkMode }
       });
     const intervalMs = marketLive ? 5000 : 15000;
     const interval = setInterval(() => {
-      fetch(`${API_URL}/api/market/quotes?symbols=${qs}`)
-        .then((res) => res.ok ? res.json() : Promise.reject())
+      fetch(`${API_URL}/api/market/quotes?symbols=${qs}`, { headers: getToken() ? { Authorization: `Bearer ${getToken()}` } : {} })
+        .then((res) => {
+          if (res.status === 503) setQuotesApiUnavailable(true);
+          return res.ok ? res.json() : Promise.reject();
+        })
         .then(updateQuotesFromResponse)
         .catch(() => {});
     }, intervalMs);
@@ -375,13 +450,6 @@ export default function Dashboard({ user, onLogout, darkMode, onToggleDarkMode }
       .catch(() => setTrades([]));
   }, [portfolio]);
 
-  useEffect(() => {
-    fetch(`${API_URL}/api/social/feed`)
-      .then((res) => res.json())
-      .then(setFeed)
-      .catch(() => setFeed([]));
-  }, [portfolio]);
-
   function addToWatchlist(s) {
     const sym = (s || searchQuery).toString().trim().toUpperCase();
     if (!sym) return;
@@ -394,6 +462,33 @@ export default function Dashboard({ user, onLogout, darkMode, onToggleDarkMode }
     setWatchlist(next);
     if (symbol === s) setSymbol(next[0] || '');
   }
+
+  // Live chart: refresh candles more often when full-screen (30s), else every 60s on dashboard
+  useEffect(() => {
+    if (mainNav !== 'dashboard') return;
+    const ms = chartFullScreen ? 30000 : 60000;
+    const id = setInterval(() => setChartRefreshTick((t) => t + 1), ms);
+    return () => clearInterval(id);
+  }, [mainNav, chartFullScreen]);
+
+  // Real-time LTP for full-screen chart: poll quotes every 5s
+  useEffect(() => {
+    if (!chartFullScreen || !symbol) return;
+    const apiSymbol = symbol.includes(':') ? symbol : symbol.replace(/\s+/g, ' ');
+    const fetchQuote = () => {
+      fetch(`${API_URL}/api/market/quotes?symbols=${encodeURIComponent(apiSymbol)}`, { headers: getToken() ? { Authorization: `Bearer ${getToken()}` } : {} })
+        .then((res) => res.ok ? res.json() : Promise.reject())
+        .then((json) => {
+          const arr = json.data || [];
+          const first = arr[0];
+          if (first && typeof first.value === 'number') setChartLtp(first.value);
+        })
+        .catch(() => {});
+    };
+    fetchQuote();
+    const id = setInterval(fetchQuote, 5000);
+    return () => { clearInterval(id); setChartLtp(null); };
+  }, [chartFullScreen, symbol]);
 
   // Fetch real chart data by symbol + range (1d, 6d, 14d, 52w, ytd, 1m, 3m)
   useEffect(() => {
@@ -411,7 +506,7 @@ export default function Dashboard({ user, onLogout, darkMode, onToggleDarkMode }
     })
       .then(async (res) => {
         const json = await res.json();
-        if (!res.ok) throw new Error(json.error || 'Failed to fetch');
+        if (!res.ok) throw { status: res.status, message: json?.error || json?.message || 'Failed to fetch' };
         return json;
       })
       .then((json) => {
@@ -426,60 +521,17 @@ export default function Dashboard({ user, onLogout, darkMode, onToggleDarkMode }
           setCandles(data);
           setChartError('');
         } else {
-          throw new Error(json.error || 'No data');
+          throw { status: 0, message: json?.error || 'No data' };
         }
       })
       .catch((err) => {
-        const now = Math.floor(Date.now() / 1000);
-        setCandles(generateMockCandles(apiSymbol, now));
-        setChartError(err?.message || 'Using sample data. Set Kite credentials for real charts.');
+        setCandles([]);
+        setChartError(err?.status === 503 || /market data unavailable|link your zerodha|kite session/i.test(String(err?.message || ''))
+          ? 'Market data unavailable. Administrator: connect Kite once to enable live charts for everyone.'
+          : (err?.message || 'Could not load chart. Connect Kite for real data.'));
       })
       .finally(() => setChartLoading(false));
-  }, [symbol, chartRange]);
-
-  async function loadComments(postId) {
-    const res = await fetch(`${API_URL}/api/social/posts/${postId}/comments`);
-    const data = await res.json();
-    setCommentByPost((prev) => ({ ...prev, [postId]: data }));
-  }
-
-  async function handleCreatePost(e) {
-    e.preventDefault();
-    if (!postContent.trim()) return;
-    setPostLoading(true);
-    setError('');
-    try {
-      const res = await fetch(`${API_URL}/api/social/posts`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${getToken()}` },
-        body: JSON.stringify({ content: postContent.trim() }),
-      });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error || 'Failed to post');
-      setPostContent('');
-      setFeed((prev) => [data, ...prev]);
-    } catch (err) {
-      setError(err.message);
-    } finally {
-      setPostLoading(false);
-    }
-  }
-
-  async function handleAddComment(postId, content) {
-    if (!content?.trim()) return;
-    try {
-      const res = await fetch(`${API_URL}/api/social/posts/${postId}/comments`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${getToken()}` },
-        body: JSON.stringify({ content: content.trim() }),
-      });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error || 'Failed to comment');
-      setCommentByPost((prev) => ({ ...prev, [postId]: [...(prev[postId] || []), data] }));
-    } catch (err) {
-      setError(err.message);
-    }
-  }
+  }, [symbol, chartRange, chartRefreshTick]);
 
   // eslint-disable-next-line no-unused-vars -- used when adding back legacy buy/sell
   function refreshPortfolio() {
@@ -505,24 +557,24 @@ export default function Dashboard({ user, onLogout, darkMode, onToggleDarkMode }
     setError('');
 
     if (tradingMode === 'paper') {
-      try {
+    try {
         const endpoint = transactionType === 'BUY' ? `${API_URL}/api/trades/buy` : `${API_URL}/api/trades/sell`;
         const res = await fetch(endpoint, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${getToken()}` },
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${getToken()}` },
           body: JSON.stringify({ symbol: trSymbol, quantity: qty }),
-        });
-        const data = await res.json();
+      });
+      const data = await res.json();
         if (!res.ok) throw new Error(data.error || 'Order failed');
-        setQuantity('10');
+      setQuantity('10');
         fetchPortfolio();
         fetch(`${API_URL}/api/trades`, { headers: { Authorization: `Bearer ${getToken()}` } })
           .then((r) => r.ok && r.json())
           .then(setTrades)
           .catch(() => {});
-      } catch (err) {
-        setError(err.message);
-      } finally {
+    } catch (err) {
+      setError(err.message);
+    } finally {
         setKiteOrderLoading(false);
       }
       return;
@@ -610,7 +662,7 @@ export default function Dashboard({ user, onLogout, darkMode, onToggleDarkMode }
             <div className="flex items-center gap-2 mb-4">
               <span className="text-2xl">📄</span>
               <h2 className="text-lg font-semibold">Risk disclosures on derivatives</h2>
-            </div>
+          </div>
             <ul className="list-disc list-inside text-sm space-y-2 mb-4 text-gray-700 dark:text-slate-300">
               <li>9 out of 10 individual traders in equity Futures and Options Segment, incurred net losses.</li>
               <li>On an average, loss makers registered net trading loss close to ₹50,000.</li>
@@ -636,14 +688,17 @@ export default function Dashboard({ user, onLogout, darkMode, onToggleDarkMode }
       />
 
       {/* Top Bar - Zerodha-style: indices | Default + NEW + grid | Dashboard/Orders/... | cart bell avatar user menu */}
-      <header className={`flex items-center justify-between gap-1 sm:gap-2 border-b px-2 sm:px-3 py-1.5 sm:py-2 min-h-[48px] sm:min-h-[52px] shrink-0 min-w-0 overflow-hidden ${darkMode ? 'border-slate-700 bg-slate-800' : 'border-gray-200 bg-white'}`}>
+      <header className={`flex items-center justify-between gap-1 sm:gap-2 border-b px-2 sm:px-3 py-1.5 sm:py-2 min-h-[48px] sm:min-h-[52px] shrink-0 min-w-0 overflow-visible ${darkMode ? 'border-slate-700 bg-slate-800' : 'border-gray-200 bg-white'}`}>
         <div className="flex items-center gap-1 sm:gap-2 min-w-0 flex-1 overflow-hidden">
           <button type="button" onClick={() => setSidebarOpen((o) => !o)} className="lg:hidden p-2 -ml-1 rounded hover:bg-gray-100 dark:hover:bg-slate-700 touch-manipulation flex-shrink-0" aria-label="Toggle watchlist">☰</button>
           <div className="hidden sm:flex items-center gap-2 md:gap-3 overflow-x-auto scrollbar-hide shrink-0">
-            {(indices.length > 0 || marketLive) && (
-              <span className="text-[10px] sm:text-xs text-green-600 dark:text-green-400 font-medium shrink-0">Live</span>
+            {quotesFromLiveApi && (
+              <span className="text-[10px] sm:text-xs text-green-600 dark:text-green-400 font-medium shrink-0" title="Real-time data from Kite">Live</span>
             )}
-            {(indices.length > 0 ? indices : MOCK_INDICES).map((idx) => (
+            {quotesApiUnavailable && (
+              <span className="text-[10px] sm:text-xs text-amber-600 dark:text-amber-400 shrink-0" title="Administrator: connect Kite once for live data">Connect Kite</span>
+            )}
+            {indices.length > 0 ? indices.map((idx) => (
               <div key={idx.name} className="flex items-center gap-1 text-xs shrink-0 whitespace-nowrap">
                 <span className={darkMode ? 'text-slate-400' : 'text-gray-600'}>{idx.name}</span>
                 <span className={darkMode ? 'text-slate-100' : 'text-gray-900'}>{Number(idx.value).toLocaleString('en-IN', { minimumFractionDigits: 2 })}</span>
@@ -651,8 +706,10 @@ export default function Dashboard({ user, onLogout, darkMode, onToggleDarkMode }
                   {idx.change >= 0 ? '+' : ''}{idx.change} ({idx.changePercent}%)
                 </span>
               </div>
-            ))}
-          </div>
+            )) : quotesApiUnavailable ? (
+              <span className="text-xs text-amber-600 dark:text-amber-400 shrink-0">Connect Kite for live indices</span>
+            ) : null}
+        </div>
           <div className="hidden lg:flex items-center gap-0.5 shrink-0">
             <select
               value={watchlistGroups.activeId}
@@ -670,34 +727,34 @@ export default function Dashboard({ user, onLogout, darkMode, onToggleDarkMode }
         </div>
         <div className="flex items-center gap-0.5 sm:gap-1 shrink-0 min-w-0">
           <div className="hidden md:flex items-center border-b-2 border-transparent" style={{ marginBottom: -1 }}>
-            {NAV_ITEMS.map((item) => (
-              <button
-                key={item.id}
-                onClick={() => setMainNav(item.id)}
+          {NAV_ITEMS.map((item) => (
+            <button
+              key={item.id}
+                onClick={() => { setMainNav(item.id); if (item.id === 'orders') setOrderPanelClosedOnOrdersTab(false); }}
                 className={`px-2 sm:px-3 py-2 text-xs sm:text-sm font-medium touch-manipulation ${mainNav === item.id ? 'text-red-600 dark:text-red-400 border-b-2 border-red-600 dark:border-red-400' : darkMode ? 'text-slate-400 hover:text-slate-200 hover:bg-slate-700' : 'text-gray-600 hover:text-gray-900 hover:bg-gray-100'}`}
                 style={mainNav === item.id ? { marginBottom: -2 } : {}}
-              >
-                {item.label}
-              </button>
-            ))}
+            >
+              {item.label}
+            </button>
+          ))}
           </div>
-          <select aria-label="Section" className={`md:hidden block rounded border px-2 py-1.5 text-sm font-medium min-w-0 max-w-[100px] touch-manipulation ${darkMode ? 'bg-slate-700 border-slate-600 text-slate-100' : 'bg-white border-gray-300 text-gray-900'}`} value={mainNav} onChange={(e) => setMainNav(e.target.value)}>
+          <select aria-label="Section" className={`md:hidden block rounded border px-2 py-1.5 text-sm font-medium min-w-0 max-w-[100px] touch-manipulation ${darkMode ? 'bg-slate-700 border-slate-600 text-slate-100' : 'bg-white border-gray-300 text-gray-900'}`} value={mainNav} onChange={(e) => { const v = e.target.value; setMainNav(v); if (v === 'orders') setOrderPanelClosedOnOrdersTab(false); }}>
             {NAV_ITEMS.map((item) => (
               <option key={item.id} value={item.id}>{item.label}</option>
             ))}
           </select>
+          <button type="button" onClick={onToggleDarkMode} className="p-2 rounded hover:bg-gray-100 dark:hover:bg-slate-700 touch-manipulation" title={darkMode ? 'Light mode' : 'Dark mode'} aria-label={darkMode ? 'Switch to light mode' : 'Switch to dark mode'}>{darkMode ? '☀️' : '🌙'}</button>
           <button type="button" className="p-2 rounded hover:bg-gray-100 dark:hover:bg-slate-700 touch-manipulation hidden sm:block" title="Cart">🛒</button>
           <button type="button" className="p-2 rounded hover:bg-gray-100 dark:hover:bg-slate-700 touch-manipulation hidden sm:block" title="Notifications">🔔</button>
-          <div className="flex items-center gap-1 sm:gap-2 pl-1 sm:pl-2 ml-0.5 border-l border-gray-200 dark:border-slate-600 min-w-0">
+          <div className="flex items-center gap-1 sm:gap-2 pl-1 sm:pl-2 ml-0.5 border-l border-gray-200 dark:border-slate-600 min-w-0 overflow-visible">
             <div className="w-7 h-7 sm:w-8 sm:h-8 rounded-full bg-pink-500 flex items-center justify-center text-white text-xs font-semibold shrink-0" title={user?.name}>{userInitials}</div>
             <span className="text-xs sm:text-sm font-medium truncate max-w-[70px] sm:max-w-none">{user?.tradingId || '—'}</span>
-            <div className="relative">
+            <div className="relative overflow-visible">
               <button type="button" onClick={() => setHeaderMenuOpen((o) => !o)} className="p-1.5 rounded hover:bg-gray-100 dark:hover:bg-slate-700 touch-manipulation" aria-label="Menu">⋮</button>
               {headerMenuOpen && (
                 <>
                   <div className="fixed inset-0 z-40" onClick={() => setHeaderMenuOpen(false)} aria-hidden="true" />
                   <div className={`absolute right-0 top-full mt-1 z-50 py-1 rounded border shadow-lg min-w-[140px] ${darkMode ? 'bg-slate-800 border-slate-600' : 'bg-white border-gray-200'}`}>
-                    <button type="button" onClick={() => { onToggleDarkMode(); setHeaderMenuOpen(false); }} className="w-full text-left px-3 py-2 text-sm hover:bg-gray-100 dark:hover:bg-slate-700">{darkMode ? '☀️ Light mode' : '🌙 Dark mode'}</button>
                     <button type="button" onClick={() => { onLogout(); setHeaderMenuOpen(false); }} className="w-full text-left px-3 py-2 text-sm text-red-600 dark:text-red-400 hover:bg-gray-100 dark:hover:bg-slate-700">Log out</button>
                   </div>
                 </>
@@ -707,10 +764,195 @@ export default function Dashboard({ user, onLogout, darkMode, onToggleDarkMode }
         </div>
       </header>
 
+      {/* Zerodha-style order popup when clicking B/S from watchlist */}
+      {orderModalOpen && orderModalSide && (() => {
+        const [ex, trSymbol] = symbol.includes(':') ? symbol.split(':') : ['NSE', symbol];
+        const isNfo = ex === 'NFO';
+        const isOpt = /(CE|PE)$/.test(String(trSymbol).toUpperCase());
+        const optionsRequireLimit = isNfo && isOpt;
+        const quoteKey = symbol.includes(':') ? symbol.split(':')[1] : (symbol === 'NIFTY 50' ? 'NIFTY 50' : symbol === 'NIFTY BANK' ? 'NIFTY BANK' : symbol);
+        const ltp = quotes[quoteKey]?.lastPrice ?? quotes[quoteKey]?.value ?? null;
+        const priceVal = orderType === 'LIMIT' || optionsRequireLimit ? (Number(orderPrice) || ltp) : ltp;
+        const qtyNum = Number(quantity) || 1;
+        const reqAmount = (priceVal != null && priceVal > 0) ? qtyNum * priceVal : 0;
+        const avail = portfolio?.user?.cashBalance ?? 0;
+        const segmentLabel = ex === 'NFO' ? 'NFO' : ex === 'BSE' ? 'BSE' : 'NSE';
+        const isSell = orderModalSide === 'SELL';
+        return (
+          <div className="fixed inset-0 z-[100] flex items-start justify-center pt-[10vh] px-3 pb-4 overflow-y-auto">
+            <div className="absolute inset-0 bg-black/50" onClick={() => { setOrderModalOpen(false); setOrderModalSide(null); }} aria-hidden="true" />
+            <div className={`relative w-full max-w-md rounded-xl shadow-xl overflow-hidden ${darkMode ? 'bg-slate-800' : 'bg-white'}`} onClick={(e) => e.stopPropagation()}>
+              {/* Header - orange for Sell, green for Buy */}
+              <div className={`px-4 py-3 ${isSell ? 'bg-orange-500' : 'bg-blue-600'} text-white`}>
+                <div className="flex items-start justify-between gap-2">
+                  <div className="min-w-0">
+                    <p className="font-semibold truncate">{getSymbolDisplayLabel(symbol).replace(/\s w\s/g, ' ʷ ')}</p>
+                    <p className="text-white/90 text-sm">{segmentLabel} {ltp != null ? formatINR(ltp) : '—'}</p>
+                  </div>
+                  <span className={`text-[10px] font-medium px-1.5 py-0.5 rounded shrink-0 ${tradingMode === 'paper' ? 'bg-white/20' : 'bg-white/20'}`}>{tradingMode === 'paper' ? 'Paper' : 'Live'}</span>
+                </div>
+              </div>
+              {/* Tabs: Quick / Regular / Iceberg */}
+              <div className="flex border-b border-gray-200 dark:border-slate-600">
+                <button type="button" className={`px-4 py-2.5 text-sm font-medium ${isSell ? 'text-orange-600 dark:text-orange-400 border-b-2 border-orange-500' : 'text-blue-600 dark:text-blue-400 border-b-2 border-blue-500'}`}>Quick</button>
+                <button type="button" className="px-4 py-2.5 text-sm font-medium text-gray-500 dark:text-slate-400 border-b-2 border-transparent">Regular</button>
+                <button type="button" className="px-4 py-2.5 text-sm font-medium text-gray-500 dark:text-slate-400 border-b-2 border-transparent">Iceberg</button>
+              </div>
+              <div className="p-4 space-y-4">
+                {/* Qty */}
+                <div>
+                  <label className="block text-xs font-medium text-gray-500 dark:text-slate-400 mb-1">Qty.</label>
+                  <div className="flex items-center gap-1">
+                    <input type="number" min={1} value={quantity} onChange={(e) => setQuantity(e.target.value)} className={`flex-1 min-w-0 rounded border px-3 py-2.5 text-sm ${darkMode ? 'border-slate-600 bg-slate-700 text-slate-100' : 'border-gray-300 bg-white text-gray-900'}`} />
+                    <button type="button" onClick={() => setQuantity(String(Math.max(1, (Number(quantity) || 1) - 1)))} className="p-2 rounded border border-gray-300 dark:border-slate-600 bg-white dark:bg-slate-700 text-gray-600 dark:text-slate-300">−</button>
+                    <button type="button" onClick={() => setQuantity(String((Number(quantity) || 1) + 1))} className="p-2 rounded border border-gray-300 dark:border-slate-600 bg-white dark:bg-slate-700 text-gray-600 dark:text-slate-300">+</button>
+                  </div>
+                </div>
+                {/* Price */}
+                <div>
+                  <label className="block text-xs font-medium text-gray-500 dark:text-slate-400 mb-1">Price</label>
+                  <div className="flex items-center gap-1">
+                    <input type="number" step="0.05" placeholder={ltp != null ? String(ltp) : '0'} value={orderPrice} onChange={(e) => setOrderPrice(e.target.value)} className={`flex-1 min-w-0 rounded border px-3 py-2.5 text-sm ${darkMode ? 'border-slate-600 bg-slate-700 text-slate-100' : 'border-gray-300 bg-white text-gray-900'}`} />
+                    <button type="button" onClick={() => setOrderPrice('')} className="p-2 rounded border border-gray-300 dark:border-slate-600 bg-white dark:bg-slate-700 text-gray-500 dark:text-slate-400" title="Clear">×</button>
+                  </div>
+                </div>
+                {/* Order type & Product */}
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <label className="block text-xs font-medium text-gray-500 dark:text-slate-400 mb-1">Type</label>
+                    <select value={orderType} onChange={(e) => setOrderType(e.target.value)} disabled={optionsRequireLimit} className={`w-full rounded border px-2 py-2 text-sm ${darkMode ? 'border-slate-600 bg-slate-700 text-slate-100' : 'border-gray-300 bg-white text-gray-900'}`}>
+                      <option value="MARKET">Market</option>
+                      <option value="LIMIT">Limit</option>
+                    </select>
+                  </div>
+                  <div>
+                    <label className="block text-xs font-medium text-gray-500 dark:text-slate-400 mb-1">Product</label>
+                    <select value={orderProduct} onChange={(e) => setOrderProduct(e.target.value)} className={`w-full rounded border px-2 py-2 text-sm ${darkMode ? 'border-slate-600 bg-slate-700 text-slate-100' : 'border-gray-300 bg-white text-gray-900'}`}>
+                      {isNfo ? (<><option value="MIS">MIS</option><option value="NRML">NRML</option></>) : (<><option value="CNC">CNC</option><option value="MIS">MIS</option><option value="NRML">NRML</option></>)}
+                    </select>
+                  </div>
+                </div>
+                {optionsRequireLimit && <p className="text-xs text-amber-600 dark:text-amber-400">Options require Limit order and price</p>}
+                {/* Intraday checkbox */}
+                <label className="flex items-center gap-2 cursor-pointer">
+                  <input type="checkbox" checked={orderProduct === 'MIS'} onChange={(e) => setOrderProduct(e.target.checked ? 'MIS' : (isNfo ? 'NRML' : 'CNC'))} className="rounded border-gray-300 dark:border-slate-600" />
+                  <span className="text-sm text-gray-700 dark:text-slate-300">Intraday</span>
+                  <span className="text-xs text-gray-500 dark:text-slate-400">1 lot</span>
+                </label>
+                {/* Req. / Avail. */}
+                <div className="text-sm space-y-1">
+                  <p className="text-gray-600 dark:text-slate-400">Req. {formatINR(reqAmount)}</p>
+                  <p className="text-gray-600 dark:text-slate-400">Avail. {formatINR(avail)}</p>
+                </div>
+                {/* Actions */}
+                <div className="grid grid-cols-2 gap-3 pt-2">
+                  <button type="button" onClick={() => { placeOrder(orderModalSide); setOrderModalOpen(false); setOrderModalSide(null); }} disabled={kiteOrderLoading || (optionsRequireLimit && !orderPrice)} className={`py-3 rounded-lg font-semibold text-white touch-manipulation disabled:opacity-50 disabled:cursor-not-allowed ${isSell ? 'bg-orange-500 hover:bg-orange-600' : 'bg-blue-600 hover:bg-blue-700'}`}>
+                    {kiteOrderLoading ? '...' : orderModalSide}
+                  </button>
+                  <button type="button" onClick={() => { setOrderModalOpen(false); setOrderModalSide(null); }} className="py-3 rounded-lg font-medium border border-gray-300 dark:border-slate-600 bg-white dark:bg-slate-700 text-gray-700 dark:text-slate-200 hover:bg-gray-50 dark:hover:bg-slate-600 touch-manipulation">
+                    Cancel
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
+
+      {/* Find an instrument modal - opened from Get started (positions empty state) or Ctrl+Shift+F */}
+      {findInstrumentModalOpen && (
+        <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 overflow-y-auto">
+          <div className="absolute inset-0 bg-black/50" onClick={() => { setFindInstrumentModalOpen(false); setFindInstrumentQuery(''); setFindInstrumentSuggestions([]); }} aria-hidden="true" />
+          <div className={`relative w-full max-w-lg rounded-xl shadow-xl overflow-hidden flex flex-col max-h-[85vh] ${darkMode ? 'bg-slate-800' : 'bg-white'}`} onClick={(e) => e.stopPropagation()}>
+            <div className="p-4 border-b border-gray-200 dark:border-slate-600 shrink-0">
+              <div className="flex items-center gap-2">
+                <span className={`shrink-0 ${darkMode ? 'text-slate-400' : 'text-gray-400'}`} aria-hidden>🔍</span>
+                <input
+                  ref={findInstrumentSearchRef}
+                  type="text"
+                  placeholder="Search eg: infy bse, nifty fut, index fund, etc"
+                  value={findInstrumentQuery}
+                  onChange={(e) => setFindInstrumentQuery(e.target.value)}
+                  onKeyDown={(e) => e.key === 'Escape' && (setFindInstrumentModalOpen(false), setFindInstrumentQuery(''))}
+                  className={`flex-1 min-w-0 rounded border px-3 py-2.5 text-sm focus:ring-2 focus:ring-blue-500 focus:outline-none ${darkMode ? 'border-slate-600 bg-slate-700 text-slate-100 placeholder-slate-400' : 'border-gray-300 bg-white text-gray-900 placeholder-gray-500'}`}
+                />
+                <span className={`shrink-0 text-[10px] px-2 py-1 rounded ${darkMode ? 'bg-slate-600 text-slate-400' : 'bg-gray-100 text-gray-500'}`}>Ctrl+Shift+F</span>
+              </div>
+            </div>
+            <div className="flex-1 overflow-auto min-h-0 p-4">
+              {findInstrumentQuery.trim().length < 1 ? (
+                <div className="flex flex-col items-center justify-center py-12 text-center">
+                  <span className="text-5xl text-gray-300 dark:text-slate-500 mb-4" aria-hidden>🔍</span>
+                  <h3 className="text-lg font-semibold text-gray-800 dark:text-slate-200 mb-1">Find an instrument</h3>
+                  <p className="text-sm text-gray-500 dark:text-slate-400">Use the above search bar to find an instrument</p>
+                </div>
+              ) : findInstrumentLoading ? (
+                <div className="py-12 text-center text-sm text-gray-500 dark:text-slate-400">Searching…</div>
+              ) : findInstrumentSuggestions.length === 0 ? (
+                <div className="flex flex-col items-center justify-center py-12 text-center">
+                  <span className="text-5xl text-gray-300 dark:text-slate-500 mb-4" aria-hidden>🔍</span>
+                  <h3 className="text-lg font-semibold text-gray-800 dark:text-slate-200 mb-1">Find an instrument</h3>
+                  <p className="text-sm text-gray-500 dark:text-slate-400">No results. Try another search.</p>
+                </div>
+              ) : (
+                <ul className="space-y-0 divide-y divide-gray-200 dark:divide-slate-600">
+                  {findInstrumentSuggestions.map((inst) => {
+                    const key = inst.key || `${inst.exchange}:${inst.tradingsymbol}`;
+                    const tag = (inst.instrument_type || '').toUpperCase() === 'INDEX' ? 'INDICES' : (inst.segment_label || inst.exchange || '').toUpperCase();
+                    return (
+                      <li
+                        key={key}
+                        className={`flex items-center justify-between gap-2 px-2 py-2.5 cursor-pointer text-left ${darkMode ? 'hover:bg-slate-700' : 'hover:bg-gray-50'}`}
+                        onClick={() => {
+                          setWatchlist((prev) => (prev.includes(key) ? prev : [...prev, key]));
+                          setSymbol(key);
+                          setMainNav('dashboard');
+                          setFindInstrumentModalOpen(false);
+                          setFindInstrumentQuery('');
+                          setFindInstrumentSuggestions([]);
+                        }}
+                      >
+                        <div className="min-w-0 flex-1">
+                          <span className="font-medium text-gray-900 dark:text-slate-100 block truncate">{inst.zerodha_display_name || inst.tradingsymbol || inst.name}</span>
+                          <span className={`text-xs ${darkMode ? 'text-slate-400' : 'text-gray-500'}`}>{inst.name || inst.tradingsymbol}{inst.segment_label ? ` · ${inst.segment_label}` : ''}</span>
+                        </div>
+                        {tag && <span className={`shrink-0 text-[10px] font-medium px-2 py-0.5 rounded ${darkMode ? 'bg-slate-600 text-slate-300' : 'bg-gray-200 text-gray-600'}`}>{tag}</span>}
+                      </li>
+                    );
+                  })}
+                </ul>
+              )}
+            </div>
+            <div className="p-4 border-t border-gray-200 dark:border-slate-600 shrink-0 flex justify-end">
+              <button type="button" onClick={() => { setFindInstrumentModalOpen(false); setFindInstrumentQuery(''); setFindInstrumentSuggestions([]); }} className="px-4 py-2 rounded-lg font-medium border border-gray-300 dark:border-slate-600 bg-white dark:bg-slate-700 text-gray-700 dark:text-slate-200 hover:bg-gray-50 dark:hover:bg-slate-600">
+                Close
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {backendDown && (
         <div className="bg-amber-50 dark:bg-amber-900/30 border-b border-amber-200 dark:border-amber-800 px-3 sm:px-4 py-3 text-xs sm:text-sm text-amber-800 dark:text-amber-200">
           <strong>Backend not running</strong> — Buy/Sell and portfolio need the server. In a terminal: <code className="bg-amber-100 dark:bg-amber-800/50 px-1 rounded break-all">cd backend && npm start</code> (ensure MongoDB is running).{' '}
           <button type="button" onClick={() => fetchPortfolio()} className="ml-2 font-medium underline touch-manipulation">Retry</button>
+        </div>
+      )}
+      {kiteRefreshMessage === 'success' && (
+        <div className="bg-green-50 dark:bg-green-900/20 border-b border-green-200 dark:border-green-800 px-3 sm:px-4 py-2 text-xs sm:text-sm text-green-800 dark:text-green-200">
+          Kite session refreshed. Live data should appear shortly.
+        </div>
+      )}
+      {kiteRefreshMessage && kiteRefreshMessage !== 'success' && (
+        <div className="bg-amber-50 dark:bg-amber-900/30 border-b border-amber-200 dark:border-amber-800 px-3 sm:px-4 py-2 text-xs sm:text-sm text-amber-800 dark:text-amber-200">
+          Kite login failed: {kiteRefreshMessage}
+        </div>
+      )}
+      {quotesApiUnavailable && !backendDown && (
+        <div className="bg-sky-50 dark:bg-sky-900/20 border-b border-sky-200 dark:border-sky-800 px-3 sm:px-4 py-2 text-xs sm:text-sm text-sky-800 dark:text-sky-200">
+          <strong>Paper trading</strong> — Real-time prices for practice. Administrator: connect Kite once so everyone gets live data (no per-user linking).{' '}
+          <a href={`${API_URL}/api/kite/login`} className="font-semibold underline hover:no-underline">Connect Kite for market data</a>
+          . In Zerodha Kite app set redirect URL to <code className="bg-sky-100 dark:bg-sky-800/50 px-1 rounded break-all">{API_URL}/api/kite/callback</code>
         </div>
       )}
       {error && !backendDown && (
@@ -730,11 +972,11 @@ export default function Dashboard({ user, onLogout, darkMode, onToggleDarkMode }
           <div className="p-2 border-b border-gray-200 dark:border-slate-700 relative">
             <div className="flex gap-1 items-center">
               <span className={`shrink-0 text-gray-400 ${darkMode ? 'text-slate-500' : ''}`} aria-hidden>🔍</span>
-              <input
-                type="text"
+            <input
+              type="text"
                 placeholder="Search: NSE/BSE stocks, indices, NFO F&O, MCX commodity"
-                value={searchQuery}
-                onChange={(e) => setSearchQuery(e.target.value)}
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
                 onFocus={() => searchSuggestions.length > 0 && setSearchSuggestionsOpen(true)}
                 onKeyDown={(e) => {
                   if (e.key === 'Enter') {
@@ -745,6 +987,7 @@ export default function Dashboard({ user, onLogout, darkMode, onToggleDarkMode }
                       setWatchlist((prev) => (prev.includes(key) ? prev : [...prev, key]));
                       setSearchQuery('');
                       setSearchSuggestions([]);
+                      setSearchSuggestionsTotal(0);
                       setSearchSuggestionsOpen(false);
                     } else addToWatchlist();
                   }
@@ -780,28 +1023,65 @@ export default function Dashboard({ user, onLogout, darkMode, onToggleDarkMode }
               </div>
             )}
             {searchSuggestionsOpen && searchSuggestions.length > 0 && (
-              <ul className={`absolute left-2 right-2 top-full mt-0.5 z-20 max-h-56 overflow-auto rounded border shadow-lg ${darkMode ? 'border-slate-600 bg-slate-800' : 'border-gray-200 bg-white'}`}>
-                {searchSuggestions.map((inst) => (
-                  <li
-                    key={inst.key || `${inst.exchange}:${inst.tradingsymbol}`}
-                    className={`flex flex-col gap-0.5 px-2 py-1.5 cursor-pointer text-left border-b last:border-b-0 ${darkMode ? 'border-slate-700 hover:bg-slate-700' : 'border-gray-100 hover:bg-gray-100'}`}
+              <div className={`absolute left-2 right-2 top-full mt-0.5 z-20 rounded border shadow-lg overflow-hidden ${darkMode ? 'border-slate-600 bg-slate-800' : 'border-gray-200 bg-white'}`}>
+                {searchSuggestionsTotal > 0 && (
+                  <div className={`px-2 py-1.5 text-xs font-medium border-b shrink-0 ${darkMode ? 'border-slate-600 text-slate-400' : 'border-gray-200 text-gray-500'}`}>
+                    Showing {searchSuggestions.length} of {searchSuggestionsTotal} matches (stocks, F&O, options, indices, MCX)
+                  </div>
+                )}
+                <ul className="max-h-72 overflow-auto">
+                  {searchSuggestions.map((inst) => (
+                    <li
+                      key={inst.key || `${inst.exchange}:${inst.tradingsymbol}`}
+                      className={`flex flex-col gap-0.5 px-2 py-1.5 cursor-pointer text-left border-b last:border-b-0 ${darkMode ? 'border-slate-700 hover:bg-slate-700' : 'border-gray-100 hover:bg-gray-100'}`}
+                      onClick={() => {
+                        const key = inst.key || `${inst.exchange}:${inst.tradingsymbol}`;
+                        setWatchlist((prev) => (prev.includes(key) ? prev : [...prev, key]));
+                        setSearchQuery('');
+                        setSearchSuggestions([]);
+                        setSearchSuggestionsTotal(0);
+                        setSearchSuggestionsOpen(false);
+                        setSymbol(key);
+                      }}
+                    >
+                      <span className="font-medium text-sm">
+                        {inst.zerodha_display_name || inst.tradingsymbol}
+                      </span>
+                      <span className={`text-xs ${darkMode ? 'text-slate-400' : 'text-gray-500'}`}>
+                        {inst.zerodha_expiry_label ? (
+                          <>
+                            <span className="font-medium">{inst.zerodha_expiry_label}</span>
+                            <span className={`ml-1.5 px-1.5 py-0.5 rounded text-[10px] ${darkMode ? 'bg-slate-600 text-slate-300' : 'bg-gray-200 text-gray-600'}`}>NFO</span>
+                          </>
+                        ) : (
+                          <>{inst.name || inst.tradingsymbol}{inst.segment_label ? ` · ${inst.segment_label}` : ` · ${inst.exchange}${inst.instrument_type ? ` · ${(inst.instrument_type === 'FUT' ? 'Future' : inst.instrument_type === 'CE' || inst.instrument_type === 'PE' ? 'Option' : inst.instrument_type === 'INDEX' ? 'Index' : inst.instrument_type === 'MF' ? 'MF' : inst.instrument_type)}` : ''}`}</>
+                        )}
+                      </span>
+                    </li>
+                  ))}
+                </ul>
+                {searchSuggestionsTotal > searchSuggestions.length && (
+                  <button
+                    type="button"
+                    disabled={searchSuggestionsLoadingMore}
+                    className={`w-full py-2 text-sm font-medium border-t ${darkMode ? 'border-slate-600 bg-slate-700 hover:bg-slate-600 text-slate-200' : 'border-gray-200 bg-gray-50 hover:bg-gray-100 text-gray-700'}`}
                     onClick={() => {
-                      const key = inst.key || `${inst.exchange}:${inst.tradingsymbol}`;
-                      setWatchlist((prev) => (prev.includes(key) ? prev : [...prev, key]));
-                      setSearchQuery('');
-                      setSearchSuggestions([]);
-                      setSearchSuggestionsOpen(false);
-                      setSymbol(key);
+                      setSearchSuggestionsLoadingMore(true);
+                      const q = searchQuery.trim();
+                      fetch(`${API_URL}/api/market/instruments/search?q=${encodeURIComponent(q)}&limit=1000&offset=${searchSuggestions.length}`)
+                        .then((res) => res.ok ? res.json() : Promise.reject())
+                        .then((json) => {
+                          const more = json.suggestions || [];
+                          setSearchSuggestions((prev) => [...prev, ...more]);
+                          setSearchSuggestionsLoadingMore(false);
+                        })
+                        .catch(() => setSearchSuggestionsLoadingMore(false));
                     }}
                   >
-                    <span className="font-medium text-sm">{inst.tradingsymbol}</span>
-                    <span className={`text-xs ${darkMode ? 'text-slate-400' : 'text-gray-500'}`}>
-                      {inst.name || inst.tradingsymbol}
-                      {inst.segment_label ? ` · ${inst.segment_label}` : ` · ${inst.exchange}${inst.instrument_type ? ` · ${(inst.instrument_type === 'FUT' ? 'Future' : inst.instrument_type === 'CE' || inst.instrument_type === 'PE' ? 'Option' : inst.instrument_type === 'INDEX' ? 'Index' : inst.instrument_type === 'MF' ? 'MF' : inst.instrument_type)}` : ''}`}
-                    </span>
-                  </li>
-                ))}
-              </ul>
+                    {searchSuggestionsLoadingMore ? 'Loading…' : `Load more (${searchSuggestionsTotal - searchSuggestions.length} more of ${searchSuggestionsTotal} total)`}
+                  </button>
+                )}
+              </div>
             )}
             <p className="mt-1 text-xs text-gray-500 dark:text-slate-500">Ctrl+K to search</p>
           </div>
@@ -809,14 +1089,24 @@ export default function Dashboard({ user, onLogout, darkMode, onToggleDarkMode }
             <span className="text-xs font-semibold text-gray-700 dark:text-slate-300">{activeGroup?.name ?? 'Default'} ({watchlist.length}/250)</span>
             <button type="button" onClick={addWatchlistGroup} className="text-xs text-blue-600 dark:text-blue-400 hover:underline shrink-0">+ New group</button>
           </div>
-          <div className="px-2 text-[11px] font-medium text-gray-500 dark:text-slate-500 uppercase tracking-wide">{activeGroup?.name ?? 'Default'} ({watchlist.length})</div>
+          <div className="px-2 flex items-center justify-between gap-1">
+            <span className="text-[11px] font-medium text-gray-500 dark:text-slate-500 uppercase tracking-wide">{activeGroup?.name ?? 'Default'} ({watchlist.length})</span>
+            {quotesFromLiveApi && <span className="text-[10px] text-green-600 dark:text-green-400 font-medium">Live</span>}
+            {quotesApiUnavailable && <span className="text-[10px] text-amber-600 dark:text-amber-400">Connect Kite</span>}
+          </div>
           <ul className="flex-1 overflow-auto min-h-0 text-sm">
             {paginatedWatchlist.map((s) => {
-              const displaySymbol = s.includes(':') ? s.split(':')[1] : s;
-              let quoteKey = s.includes(':') ? s.split(':')[1] : (s === 'NIFTY50' ? 'NIFTY 50' : s);
+              const hasColon = s.includes(':');
+              const ex = hasColon ? s.split(':')[0] : null;
+              const sym = hasColon ? s.split(':')[1] : s;
+              const displaySymbol = (ex === 'NFO' && sym && formatOptionDisplayZerodha(ex, sym)) || sym || s;
+              let quoteKey = sym || (s === 'NIFTY50' ? 'NIFTY 50' : s);
               if (quoteKey === 'NIFTYBANK') quoteKey = 'NIFTY BANK';
               const realQuote = quotes[quoteKey];
-              const q = realQuote ? { lastPrice: realQuote.lastPrice, change: realQuote.change, changePercent: realQuote.changePercent } : getMockQuote(displaySymbol);
+              const hasQuote = !!realQuote;
+              const lastPrice = hasQuote ? realQuote.lastPrice : null;
+              const change = hasQuote ? realQuote.change : null;
+              const changePercent = hasQuote ? realQuote.changePercent : null;
               const isSelected = symbol === s;
               const optionsOpen = watchlistOptionsOpen === s;
               return (
@@ -825,36 +1115,36 @@ export default function Dashboard({ user, onLogout, darkMode, onToggleDarkMode }
                   className={`group flex items-center gap-0.5 py-1.5 px-2 border-b ${isSelected ? 'bg-blue-50 dark:bg-blue-900/20 border-blue-200 dark:border-blue-800' : darkMode ? 'border-slate-700 hover:bg-slate-700' : 'border-gray-100 hover:bg-gray-200'}`}
                 >
                   <div className="min-w-0 flex-1 flex items-center gap-1 cursor-pointer" onClick={() => setSymbol(s)}>
-                    <div className="min-w-0 flex-1">
-                      <div className="font-medium truncate">{displaySymbol}{s.includes('NIFTY') || s.includes('SENSEX') ? ' INDEX' : ''}</div>
-                      <div className="flex items-center gap-2 text-xs">
-                        {watchlistShow.priceChange && <span className={q.change < 0 ? 'text-red-500' : 'text-green-500'}>{q.change >= 0 ? '+' : ''}{q.change}</span>}
-                        {watchlistShow.priceChangePct && <span className={q.change < 0 ? 'text-red-500' : 'text-green-500'}>({q.changePercent}%)</span>}
-                        {watchlistShow.priceDirection && <span className={q.change < 0 ? 'text-red-500' : 'text-green-500'}>{q.change < 0 ? '▼' : '▲'}</span>}
-                        <span className={darkMode ? 'text-slate-400' : 'text-gray-500'}>{q.lastPrice.toFixed(2)}</span>
-                      </div>
+                  <div className="min-w-0 flex-1">
+                      <div className="font-medium truncate">{displaySymbol.replace(/\s w\s/g, ' ʷ ')}{ex !== 'NFO' && (s.includes('NIFTY') || s.includes('SENSEX')) ? ' INDEX' : ''}</div>
+                    <div className="flex items-center gap-2 text-xs">
+                        {watchlistShow.priceChange && (hasQuote ? <span className={change < 0 ? 'text-red-500' : 'text-green-500'}>{change >= 0 ? '+' : ''}{change}</span> : <span className={darkMode ? 'text-slate-500' : 'text-gray-400'}>—</span>)}
+                        {watchlistShow.priceChangePct && (hasQuote ? <span className={changePercent < 0 ? 'text-red-500' : 'text-green-500'}>({changePercent}%)</span> : <span className={darkMode ? 'text-slate-500' : 'text-gray-400'}>—</span>)}
+                        {watchlistShow.priceDirection && (hasQuote ? <span className={change < 0 ? 'text-red-500' : 'text-green-500'}>{change < 0 ? '▼' : '▲'}</span> : <span className={darkMode ? 'text-slate-500' : 'text-gray-400'}>—</span>)}
+                      <span className={darkMode ? 'text-slate-400' : 'text-gray-500'}>{lastPrice != null ? Number(lastPrice).toFixed(2) : '—'}</span>
                     </div>
                   </div>
+                  </div>
                   <div className="flex items-center gap-0.5 opacity-100 sm:opacity-0 sm:group-hover:opacity-100 flex-shrink-0" onClick={(e) => e.stopPropagation()}>
-                    <button type="button" onClick={() => { setSymbol(s); setMainNav('dashboard'); setSidebarOpen(false); }} className="p-1.5 sm:p-1 rounded bg-green-600 text-white hover:bg-green-700 touch-manipulation min-w-[28px]" title="Buy">▲</button>
-                    <button type="button" onClick={() => { setSymbol(s); setMainNav('dashboard'); setSidebarOpen(false); }} className="p-1.5 sm:p-1 rounded bg-red-600 text-white hover:bg-red-700 touch-manipulation min-w-[28px]" title="Sell">▼</button>
-                    <button type="button" onClick={() => { setMarketDepthSymbol(s); setWatchlistOptionsOpen(null); setSidebarOpen(false); }} className="p-1.5 sm:p-1 rounded border border-gray-300 dark:border-slate-600 bg-white dark:bg-slate-700 hover:bg-gray-100 dark:hover:bg-slate-600 touch-manipulation min-w-[28px]" title="Market Depth (D)">≡</button>
-                    <button type="button" onClick={() => { setSymbol(s); setWatchlistOptionsOpen(null); setMainNav('dashboard'); setSidebarOpen(false); }} className="p-1.5 sm:p-1 rounded border border-gray-300 dark:border-slate-600 bg-white dark:bg-slate-700 hover:bg-gray-100 dark:hover:bg-slate-600 touch-manipulation min-w-[28px]" title="Chart">📈</button>
-                    <button type="button" onClick={() => removeFromWatchlist(s)} className="p-1.5 sm:p-1 rounded border border-gray-300 dark:border-slate-600 bg-white dark:bg-slate-700 hover:bg-red-100 dark:hover:bg-red-900/30 text-red-600 touch-manipulation min-w-[28px]" title="Delete">🗑</button>
+                    <button type="button" onClick={() => { setSymbol(s); setOrderModalSide('BUY'); setOrderModalOpen(true); setMainNav('dashboard'); setChartFullScreen(false); setSidebarOpen(false); }} className="w-7 h-7 sm:w-8 sm:h-8 flex items-center justify-center rounded text-white font-semibold text-sm bg-blue-600 hover:bg-blue-700 touch-manipulation shrink-0" title="Buy">B</button>
+                    <button type="button" onClick={() => { setSymbol(s); setOrderModalSide('SELL'); setOrderModalOpen(true); setMainNav('dashboard'); setChartFullScreen(false); setSidebarOpen(false); }} className="w-7 h-7 sm:w-8 sm:h-8 flex items-center justify-center rounded text-white font-semibold text-sm bg-orange-500 hover:bg-orange-600 touch-manipulation shrink-0" title="Sell">S</button>
+                    <button type="button" onClick={() => { setSymbol(s); setChartFullScreen(true); setWatchlistOptionsOpen(null); setMainNav('dashboard'); setSidebarOpen(false); }} className="w-7 h-7 sm:w-8 sm:h-8 flex items-center justify-center rounded border border-gray-300 dark:border-slate-600 bg-white dark:bg-slate-700 hover:bg-gray-100 dark:hover:bg-slate-600 touch-manipulation shrink-0" title="Chart">📈</button>
                     <div className="relative">
-                      <button type="button" onClick={() => setWatchlistOptionsOpen(optionsOpen ? null : s)} className="p-1.5 sm:p-1 rounded border border-gray-300 dark:border-slate-600 bg-white dark:bg-slate-700 hover:bg-gray-100 dark:hover:bg-slate-600 touch-manipulation min-w-[28px]" title="Options">⋮</button>
+                      <button type="button" onClick={() => setWatchlistOptionsOpen(optionsOpen ? null : s)} className="w-7 h-7 sm:w-8 sm:h-8 flex items-center justify-center rounded border border-gray-300 dark:border-slate-600 bg-white dark:bg-slate-700 hover:bg-gray-100 dark:hover:bg-slate-600 touch-manipulation shrink-0 text-gray-700 dark:text-slate-200" title="Menu" aria-label="Options">☰</button>
                       {optionsOpen && (
                         <div className={`absolute left-0 top-full mt-0.5 z-30 min-w-[160px] py-1 rounded border shadow-lg ${darkMode ? 'bg-slate-800 border-slate-600' : 'bg-white border-gray-200'}`}>
                           <button type="button" onClick={() => { setOptionChainExpiry(null); setOptionChainSymbol(s); setWatchlistOptionsOpen(null); }} className="w-full text-left px-3 py-1.5 text-xs hover:bg-gray-100 dark:hover:bg-slate-700">Option chain</button>
                           <button type="button" onClick={() => { setMarketDepthSymbol(s); setWatchlistOptionsOpen(null); }} className="w-full text-left px-3 py-1.5 text-xs hover:bg-gray-100 dark:hover:bg-slate-700">Market depth</button>
-                          <button type="button" onClick={() => { setSymbol(s); setWatchlistOptionsOpen(null); setMainNav('dashboard'); setSidebarOpen(false); }} className="w-full text-left px-3 py-1.5 text-xs hover:bg-gray-100 dark:hover:bg-slate-700">Chart</button>
+                          <button type="button" onClick={() => { setSymbol(s); setChartFullScreen(true); setWatchlistOptionsOpen(null); setMainNav('dashboard'); setSidebarOpen(false); }} className="w-full text-left px-3 py-1.5 text-xs hover:bg-gray-100 dark:hover:bg-slate-700">Chart</button>
                           <button type="button" className="w-full text-left px-3 py-1.5 text-xs hover:bg-gray-100 dark:hover:bg-slate-700">Create alert / ATO</button>
                           <button type="button" className="w-full text-left px-3 py-1.5 text-xs hover:bg-gray-100 dark:hover:bg-slate-700">Notes</button>
                           <button type="button" className="w-full text-left px-3 py-1.5 text-xs hover:bg-gray-100 dark:hover:bg-slate-700">Fundamentals</button>
                           <button type="button" className="w-full text-left px-3 py-1.5 text-xs hover:bg-gray-100 dark:hover:bg-slate-700">Technicals</button>
+                          <button type="button" onClick={() => { removeFromWatchlist(s); setWatchlistOptionsOpen(null); }} className="w-full text-left px-3 py-1.5 text-xs text-red-600 dark:text-red-400 hover:bg-gray-100 dark:hover:bg-slate-700">Remove from watchlist</button>
                         </div>
                       )}
                     </div>
+                    <button type="button" onClick={() => { setSymbol(s); setOrderModalSide('BUY'); setOrderModalOpen(true); setMainNav('dashboard'); setChartFullScreen(false); setSidebarOpen(false); }} className="w-7 h-7 sm:w-8 sm:h-8 flex items-center justify-center rounded text-white font-semibold text-lg leading-none bg-green-600 hover:bg-green-700 touch-manipulation shrink-0" title="Quick buy">+</button>
                   </div>
                 </li>
               );
@@ -877,6 +1167,58 @@ export default function Dashboard({ user, onLogout, darkMode, onToggleDarkMode }
         <main className={`flex-1 flex flex-col min-h-0 min-w-0 overflow-x-hidden ${mainNav === 'dashboard' ? '' : 'overflow-auto'} ${darkMode ? 'bg-slate-900' : 'bg-gray-50'}`}>
           {mainNav === 'dashboard' && (
             <div className="flex flex-1 min-h-0 min-w-0 flex-col lg:flex-row overflow-hidden">
+              {/* Full-screen chart when opened from watchlist Chart */}
+              {chartFullScreen ? (
+                <div className="flex-1 min-h-0 min-w-0 flex flex-col overflow-hidden">
+                  <div className={`flex items-center justify-between gap-2 px-3 py-2 border-b shrink-0 ${darkMode ? 'border-slate-700 bg-slate-800' : 'border-gray-200 bg-white'}`}>
+                    <span className="font-semibold text-gray-900 dark:text-slate-100 truncate">{getSymbolDisplayLabel(symbol)}</span>
+                    <div className="flex items-center gap-2">
+                      <div className="flex flex-wrap gap-1">
+                        {[
+                          { id: '1d', label: '1D' },
+                          { id: '6d', label: '6D' },
+                          { id: '14d', label: '14D' },
+                          { id: '1m', label: '1M' },
+                          { id: '3m', label: '3M' },
+                          { id: '52w', label: '52W' },
+                          { id: 'ytd', label: 'YTD' },
+                        ].map(({ id, label }) => (
+                          <button
+                            key={id}
+                            type="button"
+                            onClick={() => setChartRange(id)}
+                            className={`px-2 py-1 text-xs font-medium rounded ${chartRange === id ? 'bg-blue-600 text-white' : darkMode ? 'bg-slate-700 text-slate-300 hover:bg-slate-600' : 'bg-gray-200 text-gray-700 hover:bg-gray-300'}`}
+                          >
+                            {label}
+                          </button>
+                        ))}
+                      </div>
+                      {chartLtp != null && (
+                        <span className={`text-sm font-medium ${chartLtp >= (candles[candles.length - 1]?.open ?? 0) ? 'text-green-600 dark:text-green-400' : 'text-red-600 dark:text-red-400'}`}>
+                          LTP {Number(chartLtp).toLocaleString('en-IN', { minimumFractionDigits: 2 })}
+                        </span>
+                      )}
+                      <button type="button" onClick={() => setChartFullScreen(false)} className="p-2 rounded hover:bg-gray-200 dark:hover:bg-slate-600 text-gray-600 dark:text-slate-400 font-medium" title="Close chart">✕</button>
+                    </div>
+                  </div>
+                  <div className="flex-1 min-h-0 min-w-0 relative">
+                    {chartLoading && (
+                      <div className={`absolute inset-0 flex items-center justify-center z-10 ${darkMode ? 'bg-slate-900/80' : 'bg-gray-100/80'}`}>
+                        <span className="text-sm text-gray-600 dark:text-slate-400">Loading chart…</span>
+                      </div>
+                    )}
+                    {!chartLoading && candles.length === 0 && chartError ? (
+                      <div className={`absolute inset-0 flex items-center justify-center ${darkMode ? 'bg-slate-900 text-slate-300' : 'bg-gray-50 text-gray-600'}`}>
+                        <p className="text-sm text-center px-4 max-w-md">{chartError}</p>
+                      </div>
+                    ) : (
+                      <PriceChart data={candles} darkMode={darkMode} lastPrice={chartLtp} />
+                    )}
+                  </div>
+                  {chartError && candles.length > 0 && <p className="text-xs text-amber-600 dark:text-amber-400 px-3 py-1 shrink-0" role="alert">{chartError}</p>}
+                </div>
+              ) : (
+              <>
               {/* Center: scrollable content (chart + cards) */}
               <div className="flex-1 min-h-0 min-w-0 overflow-auto">
                 <div className="p-3 sm:p-4 md:p-6 space-y-4 md:space-y-6 min-w-0 max-w-full">
@@ -893,30 +1235,30 @@ export default function Dashboard({ user, onLogout, darkMode, onToggleDarkMode }
                       <div className="flex items-center gap-2 mb-1">
                         <span className="text-lg shrink-0" aria-hidden>🕐</span>
                         <h3 className="font-semibold text-gray-900 dark:text-slate-100">Equity</h3>
-                      </div>
+                    </div>
                       <p className="text-2xl sm:text-3xl font-bold text-gray-900 dark:text-slate-100">{portfolio ? formatINRCompact(portfolio.user?.cashBalance ?? 0) : '—'}</p>
                       <p className="text-xs text-gray-500 dark:text-slate-400">Margin available</p>
                       <p className="text-xs text-gray-500 dark:text-slate-400 mt-2">Margins used 0</p>
                       <p className="text-xs text-gray-500 dark:text-slate-400">Opening balance {portfolio ? formatINRCompact(portfolio.user?.cashBalance ?? 0) : '—'}</p>
-                      <button type="button" className="text-sm text-blue-600 dark:text-blue-400 mt-2 hover:underline">View statement</button>
-                    </div>
+                    <button type="button" className="text-sm text-blue-600 dark:text-blue-400 mt-2 hover:underline">View statement</button>
+                  </div>
                     <div className={`rounded-lg border p-4 min-w-0 overflow-hidden ${darkMode ? 'border-slate-700 bg-slate-800' : 'border-gray-200 bg-white'}`}>
                       <div className="flex items-center gap-2 mb-1">
                         <span className="text-lg shrink-0" aria-hidden>📊</span>
                         <h3 className="font-semibold text-gray-900 dark:text-slate-100">Commodity</h3>
-                      </div>
+                    </div>
                       <p className="text-2xl sm:text-3xl font-bold text-gray-900 dark:text-slate-100">0</p>
                       <p className="text-xs text-gray-500 dark:text-slate-400">Margin available</p>
                       <p className="text-xs text-gray-500 dark:text-slate-400 mt-2">Margins used 0</p>
                       <p className="text-xs text-gray-500 dark:text-slate-400">Opening balance 0</p>
-                      <button type="button" className="text-sm text-blue-600 dark:text-blue-400 mt-2 hover:underline">View statement</button>
-                    </div>
+                    <button type="button" className="text-sm text-blue-600 dark:text-blue-400 mt-2 hover:underline">View statement</button>
                   </div>
+                </div>
 
                   <div className={`rounded-lg border p-4 min-w-0 overflow-hidden ${darkMode ? 'border-slate-700 bg-slate-800' : 'border-gray-200 bg-white'}`}>
                     <h3 className="font-semibold text-gray-900 dark:text-slate-100 mb-3">Holdings ({portfolio?.holdings?.length || 0})</h3>
-                    {portfolio?.holdings?.length ? (
-                      <>
+                  {portfolio?.holdings?.length ? (
+                    <>
                         <div className="flex flex-wrap items-start gap-4">
                           <div>
                             <p className={`text-2xl sm:text-3xl font-bold ${totalUnrealizedPnl >= 0 ? 'text-green-600 dark:text-green-400' : 'text-red-600 dark:text-red-400'}`}>
@@ -926,11 +1268,11 @@ export default function Dashboard({ user, onLogout, darkMode, onToggleDarkMode }
                             <p className={`text-sm font-medium ${totalUnrealizedPnl >= 0 ? 'text-green-600 dark:text-green-400' : 'text-red-600 dark:text-red-400'}`}>
                               {portfolio?.holdings?.length ? ((totalUnrealizedPnl / (portfolio.holdings.reduce((s, h) => s + (h.value || 0), 0)) || 0) * 100).toFixed(2) : 0}%
                             </p>
-                          </div>
+                      </div>
                           <div className="text-sm text-gray-600 dark:text-slate-300">
                             <p>Current value {formatINR(portfolio?.holdings?.reduce((s, h) => s + (h.value || 0), 0) || 0)}</p>
                             <p>Investment {formatINR(portfolio?.holdings?.reduce((s, h) => s + h.quantity * h.avgBuyPrice, 0) || 0)}</p>
-                          </div>
+                      </div>
                         </div>
                         <div className="mt-3 h-2 bg-gray-200 dark:bg-slate-600 rounded-full overflow-hidden flex">
                           <div className="h-full bg-blue-600 dark:bg-blue-500" style={{ width: portfolio?.portfolioValue && portfolio.portfolioValue > 0 ? Math.min(100, Math.max(0, 100 * (portfolio.holdings?.reduce((s, h) => s + (h.value || 0), 0) || 0) / portfolio.portfolioValue)) : 50 }} />
@@ -940,12 +1282,12 @@ export default function Dashboard({ user, onLogout, darkMode, onToggleDarkMode }
                           <label className="flex items-center gap-1.5 cursor-pointer"><input type="radio" name="holdingsView" checked={holdingsView === 'current'} onChange={() => setHoldingsView('current')} /> Current value</label>
                           <label className="flex items-center gap-1.5 cursor-pointer"><input type="radio" name="holdingsView" checked={holdingsView === 'invested'} onChange={() => setHoldingsView('invested')} /> Invested</label>
                           <label className="flex items-center gap-1.5 cursor-pointer"><input type="radio" name="holdingsView" checked={holdingsView === 'pnl'} onChange={() => setHoldingsView('pnl')} /> P&L</label>
-                        </div>
-                      </>
-                    ) : (
+                      </div>
+                    </>
+                  ) : (
                       <p className="text-gray-500 dark:text-slate-400 text-sm">No holdings. Place a buy order from the order panel.</p>
-                    )}
-                  </div>
+                  )}
+                </div>
 
                   <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 min-w-0">
                     <div className="lg:col-span-2 min-w-0">
@@ -953,9 +1295,9 @@ export default function Dashboard({ user, onLogout, darkMode, onToggleDarkMode }
                         <div className="flex items-center gap-2 mb-2">
                           <span className="text-lg text-gray-500 dark:text-slate-400" aria-hidden>📈</span>
                           <h3 className="font-semibold text-gray-900 dark:text-slate-100">Market overview</h3>
-                        </div>
+                  </div>
                         <div className="flex flex-wrap items-center justify-between gap-2 mb-2 min-w-0">
-                          <span className="text-sm font-medium text-gray-600 dark:text-slate-400 truncate">{symbol.includes(':') ? symbol.split(':')[1] : symbol}</span>
+                          <span className="text-sm font-medium text-gray-600 dark:text-slate-400 truncate">{getSymbolDisplayLabel(symbol)}</span>
                           <div className="flex flex-wrap gap-1">
                             {[
                               { id: '1d', label: '1D' },
@@ -986,22 +1328,137 @@ export default function Dashboard({ user, onLogout, darkMode, onToggleDarkMode }
                               <span className="text-sm text-gray-600 dark:text-slate-400">Loading chart…</span>
                             </div>
                           )}
-                          <PriceChart data={candles} />
+                          {!chartLoading && candles.length === 0 && chartError ? (
+                            <div className={`absolute inset-0 flex items-center justify-center rounded ${darkMode ? 'bg-slate-900 text-slate-300' : 'bg-gray-100 text-gray-600'}`}>
+                              <p className="text-sm text-center px-4 max-w-md">{chartError}</p>
+                            </div>
+                          ) : (
+                            <PriceChart data={candles} darkMode={darkMode} />
+                          )}
                         </div>
-                        {chartError && <p className="text-xs text-amber-600 dark:text-amber-400 mt-1">{chartError}</p>}
+                        {chartError && candles.length > 0 && <p className="text-xs text-amber-600 dark:text-amber-400 mt-1" role="alert">{chartError}</p>}
                       </div>
                     </div>
                     <div className={`rounded-lg border p-6 min-w-0 flex flex-col items-center justify-center text-center min-h-[260px] lg:min-h-0 ${darkMode ? 'border-slate-700 bg-slate-800' : 'border-gray-200 bg-gray-50'}`}>
                       <span className="text-4xl text-gray-300 dark:text-slate-600 mb-2" aria-hidden>⚓</span>
                       <p className="text-sm font-medium text-gray-700 dark:text-slate-300">You don&apos;t have any positions yet</p>
-                      <button type="button" onClick={() => setMainNav('dashboard')} className="mt-3 px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white text-sm font-medium rounded touch-manipulation">Get started</button>
+                      <button type="button" onClick={() => setFindInstrumentModalOpen(true)} className="mt-4 px-5 py-2.5 rounded-lg font-semibold text-white bg-blue-600 hover:bg-blue-700 focus:ring-2 focus:ring-blue-500 focus:outline-none touch-manipulation">
+                        Get started
+                      </button>
                     </div>
                   </div>
                 </div>
               </div>
 
-              {/* Right sidebar - Order panel: full width below chart on mobile, sidebar on lg+ */}
-              {(() => {
+              {/* Right sidebar - Order panel: only when user clicked Buy/Sell from watchlist */}
+              {(orderSide !== null) && (() => {
+                const [ex, trSymbol] = symbol.includes(':') ? symbol.split(':') : ['NSE', symbol];
+                const isNfo = ex === 'NFO';
+                const isOpt = /(CE|PE)$/.test(String(trSymbol).toUpperCase());
+                const optionsRequireLimit = isNfo && isOpt;
+                return (
+                  <aside ref={orderPanelRef} className={`w-full lg:w-72 shrink-0 flex flex-col border-t lg:border-t-0 border-l min-w-0 overflow-hidden ${darkMode ? 'border-slate-700 bg-slate-800' : 'border-gray-200 bg-white'}`}>
+                    <div className="p-3 border-b border-gray-200 dark:border-slate-700 min-w-0">
+                      <div className="flex items-center justify-between gap-2 min-w-0">
+                        <h3 className="text-sm font-semibold text-gray-900 dark:text-slate-100 shrink-0">Order</h3>
+                        <div className="flex items-center gap-1 shrink-0">
+                          <span className={`text-[10px] font-medium px-1.5 py-0.5 rounded ${tradingMode === 'paper' ? 'bg-amber-100 text-amber-800 dark:bg-amber-900/40 dark:text-amber-200' : 'bg-emerald-100 text-emerald-800 dark:bg-emerald-900/40 dark:text-emerald-200'}`}>{tradingMode === 'paper' ? 'Paper' : 'Live'}</span>
+                          <button type="button" onClick={() => setOrderSide(null)} className="p-1 rounded hover:bg-gray-200 dark:hover:bg-slate-600 text-gray-500 dark:text-slate-400 hover:text-gray-700 dark:hover:text-slate-200" title="Close order panel" aria-label="Close">×</button>
+              </div>
+                      </div>
+                      <p className="text-xs text-gray-500 dark:text-slate-400 mt-0.5 truncate" title={tradingMode === 'paper' ? 'Simulated on TradeSphere' : 'Scrip from watchlist or search'}>{tradingMode === 'paper' ? 'Simulated on TradeSphere' : 'Scrip from watchlist or search'}</p>
+                    </div>
+                    <div className="p-3 flex flex-col gap-3 flex-1 min-h-0 min-w-0">
+                      <div className="min-w-0">
+                        <label className="block text-xs font-medium text-gray-500 dark:text-slate-400 mb-1">Symbol</label>
+                        <input placeholder="e.g. RELIANCE" value={symbol} onChange={(e) => { setSymbol(e.target.value); setOrderSide(null); }} className={`w-full min-w-0 rounded border px-2.5 py-2.5 sm:py-2 text-sm touch-manipulation box-border ${darkMode ? 'border-slate-600 bg-slate-700 text-slate-100 placeholder-slate-400' : 'border-gray-300 bg-white text-gray-900 placeholder-gray-400'}`} />
+                      </div>
+                      <div className="min-w-0">
+                        <label className="block text-xs font-medium text-gray-500 dark:text-slate-400 mb-1">Quantity</label>
+                        <input type="number" placeholder="0" value={quantity} onChange={(e) => setQuantity(e.target.value)} min={1} className={`w-full min-w-0 rounded border px-2.5 py-2.5 sm:py-2 text-sm touch-manipulation box-border ${darkMode ? 'border-slate-600 bg-slate-700 text-slate-100' : 'border-gray-300 bg-white text-gray-900'}`} />
+                      </div>
+                      {optionsRequireLimit && <p className="text-xs text-amber-600 dark:text-amber-400">Options: LIMIT order & price required</p>}
+                      <div className="grid grid-cols-2 gap-2 min-w-0">
+                        <div className="min-w-0">
+                          <label className="block text-xs font-medium text-gray-500 dark:text-slate-400 mb-1">Type</label>
+                          <select value={orderType} onChange={(e) => setOrderType(e.target.value)} disabled={optionsRequireLimit} className={`w-full min-w-0 rounded border px-2 py-2 text-sm box-border ${darkMode ? 'border-slate-600 bg-slate-700 text-slate-100' : 'border-gray-300 bg-white text-gray-900'}`}>
+                            <option value="MARKET">Market</option>
+                            <option value="LIMIT">Limit</option>
+                          </select>
+                        </div>
+                        <div className="min-w-0">
+                          <label className="block text-xs font-medium text-gray-500 dark:text-slate-400 mb-1">Product</label>
+                          <select value={orderProduct} onChange={(e) => setOrderProduct(e.target.value)} className={`w-full min-w-0 rounded border px-2 py-2 text-sm box-border ${darkMode ? 'border-slate-600 bg-slate-700 text-slate-100' : 'border-gray-300 bg-white text-gray-900'}`}>
+                            {isNfo ? (<><option value="MIS">MIS</option><option value="NRML">NRML</option></>) : (<><option value="CNC">CNC</option><option value="MIS">MIS</option><option value="NRML">NRML</option></>)}
+                          </select>
+                        </div>
+                      </div>
+                      {(orderType === 'LIMIT' || optionsRequireLimit) && (
+                        <div>
+                          <label className="block text-xs font-medium text-gray-500 dark:text-slate-400 mb-1">Price (₹)</label>
+                          <input type="number" step="0.05" placeholder="0.00" value={orderPrice} onChange={(e) => setOrderPrice(e.target.value)} className={`w-full rounded border px-2.5 py-2 text-sm ${darkMode ? 'border-slate-600 bg-slate-700 text-slate-100' : 'border-gray-300 bg-white text-gray-900'}`} />
+                        </div>
+                      )}
+                      <div className={`grid gap-2 mt-auto pt-2 min-w-0 ${orderSide ? 'grid-cols-1' : 'grid-cols-2'}`}>
+                        {(orderSide === null || orderSide === 'BUY') && (
+                          <button type="button" onClick={() => { placeOrder('BUY'); setOrderSide(null); }} disabled={kiteOrderLoading || (optionsRequireLimit && !orderPrice)} className="rounded py-3 sm:py-2.5 text-sm font-medium text-white bg-green-600 hover:bg-green-700 disabled:opacity-50 disabled:cursor-not-allowed touch-manipulation min-h-[44px] sm:min-h-0 min-w-0">Buy</button>
+                        )}
+                        {(orderSide === null || orderSide === 'SELL') && (
+                          <button type="button" onClick={() => { placeOrder('SELL'); setOrderSide(null); }} disabled={kiteOrderLoading || (optionsRequireLimit && !orderPrice)} className="rounded py-3 sm:py-2.5 text-sm font-medium text-white bg-red-600 hover:bg-red-700 disabled:opacity-50 disabled:cursor-not-allowed touch-manipulation min-h-[44px] sm:min-h-0 min-w-0">Sell</button>
+                        )}
+                      </div>
+                      <p className="text-[10px] text-gray-400 dark:text-slate-500 break-words overflow-hidden">Kite · F&O: MIS/NRML · Options: Limit</p>
+                    </div>
+                  </aside>
+                );
+              })()}
+            </>
+            )}
+            </div>
+          )}
+
+          {mainNav === 'orders' && (
+            <div className="flex flex-1 min-h-0 min-w-0 flex-col lg:flex-row overflow-hidden">
+              <div className="flex-1 min-h-0 overflow-auto p-3 sm:p-6">
+              <div className={`rounded-lg border overflow-hidden ${darkMode ? 'border-slate-700 bg-slate-800' : 'border-gray-200 bg-white'}`}>
+                  <h3 className="px-3 sm:px-4 py-3 font-semibold border-b border-gray-200 dark:border-slate-700">Orders</h3>
+                  {orderPanelClosedOnOrdersTab && (
+                    <button type="button" onClick={() => setOrderPanelClosedOnOrdersTab(false)} className="m-3 px-3 py-2 text-sm font-medium text-blue-600 dark:text-blue-400 hover:underline">Show order panel</button>
+                  )}
+                <div className="overflow-x-auto max-h-96 p-3 sm:p-4">
+                  <table className="w-full text-left text-sm min-w-[500px]">
+                    <thead>
+                      <tr className="border-b border-gray-200 dark:border-slate-600 text-gray-600 dark:text-slate-400">
+                        <th className="pb-2 pr-4">Time</th>
+                        <th className="pb-2 pr-4">Instrument</th>
+                        <th className="pb-2 pr-4">Side</th>
+                        <th className="pb-2 pr-4">Qty</th>
+                        <th className="pb-2 pr-4">Price</th>
+                        <th className="pb-2">Total</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {trades.length === 0 ? (
+                        <tr><td colSpan={6} className="py-4 text-gray-500 dark:text-slate-500">No orders yet</td></tr>
+                      ) : (
+                        [...trades].reverse().slice(0, 20).map((t) => (
+                          <tr key={t._id} className="border-b border-gray-100 dark:border-slate-700">
+                            <td className="py-1.5 pr-4 text-gray-600 dark:text-slate-400">{t.createdAt ? new Date(t.createdAt).toLocaleString() : '—'}</td>
+                            <td className="py-1.5 pr-4">{t.symbol}</td>
+                            <td className={`py-1.5 pr-4 font-medium ${t.side === 'buy' ? 'text-green-600 dark:text-emerald-400' : 'text-red-600 dark:text-red-400'}`}>{t.side}</td>
+                            <td className="py-1.5 pr-4">{t.quantity}</td>
+                            <td className="py-1.5 pr-4">{formatINR(t.price)}</td>
+                            <td className="py-1.5">{formatINR(t.totalAmount)}</td>
+                          </tr>
+                        ))
+                      )}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+              </div>
+              {/* Order panel on Orders tab - hidden when user closed it */}
+              {!orderPanelClosedOnOrdersTab && (() => {
                 const [ex, trSymbol] = symbol.includes(':') ? symbol.split(':') : ['NSE', symbol];
                 const isNfo = ex === 'NFO';
                 const isOpt = /(CE|PE)$/.test(String(trSymbol).toUpperCase());
@@ -1011,14 +1468,17 @@ export default function Dashboard({ user, onLogout, darkMode, onToggleDarkMode }
                     <div className="p-3 border-b border-gray-200 dark:border-slate-700 min-w-0">
                       <div className="flex items-center justify-between gap-2 min-w-0">
                         <h3 className="text-sm font-semibold text-gray-900 dark:text-slate-100 shrink-0">Order</h3>
-                        <span className={`text-[10px] font-medium px-1.5 py-0.5 rounded shrink-0 ${tradingMode === 'paper' ? 'bg-amber-100 text-amber-800 dark:bg-amber-900/40 dark:text-amber-200' : 'bg-emerald-100 text-emerald-800 dark:bg-emerald-900/40 dark:text-emerald-200'}`}>{tradingMode === 'paper' ? 'Paper' : 'Live'}</span>
+                        <div className="flex items-center gap-1 shrink-0">
+                          <span className={`text-[10px] font-medium px-1.5 py-0.5 rounded ${tradingMode === 'paper' ? 'bg-amber-100 text-amber-800 dark:bg-amber-900/40 dark:text-amber-200' : 'bg-emerald-100 text-emerald-800 dark:bg-emerald-900/40 dark:text-emerald-200'}`}>{tradingMode === 'paper' ? 'Paper' : 'Live'}</span>
+                          <button type="button" onClick={() => setOrderPanelClosedOnOrdersTab(true)} className="p-1 rounded hover:bg-gray-200 dark:hover:bg-slate-600 text-gray-500 dark:text-slate-400 hover:text-gray-700 dark:hover:text-slate-200" title="Close order panel" aria-label="Close">×</button>
+                        </div>
                       </div>
-                      <p className="text-xs text-gray-500 dark:text-slate-400 mt-0.5 truncate" title={tradingMode === 'paper' ? 'Simulated on TradeSphere' : 'Scrip from watchlist or search'}>{tradingMode === 'paper' ? 'Simulated on TradeSphere' : 'Scrip from watchlist or search'}</p>
+                      <p className="text-xs text-gray-500 dark:text-slate-400 mt-0.5 truncate">{tradingMode === 'paper' ? 'Simulated on TradeSphere' : 'Scrip from watchlist or search'}</p>
                     </div>
                     <div className="p-3 flex flex-col gap-3 flex-1 min-h-0 min-w-0">
                       <div className="min-w-0">
                         <label className="block text-xs font-medium text-gray-500 dark:text-slate-400 mb-1">Symbol</label>
-                        <input placeholder="e.g. RELIANCE" value={symbol} onChange={(e) => setSymbol(e.target.value)} className={`w-full min-w-0 rounded border px-2.5 py-2.5 sm:py-2 text-sm touch-manipulation box-border ${darkMode ? 'border-slate-600 bg-slate-700 text-slate-100 placeholder-slate-400' : 'border-gray-300 bg-white text-gray-900 placeholder-gray-400'}`} />
+                        <input placeholder="e.g. RELIANCE" value={symbol} onChange={(e) => { setSymbol(e.target.value); setOrderSide(null); }} className={`w-full min-w-0 rounded border px-2.5 py-2.5 sm:py-2 text-sm touch-manipulation box-border ${darkMode ? 'border-slate-600 bg-slate-700 text-slate-100 placeholder-slate-400' : 'border-gray-300 bg-white text-gray-900 placeholder-gray-400'}`} />
                       </div>
                       <div className="min-w-0">
                         <label className="block text-xs font-medium text-gray-500 dark:text-slate-400 mb-1">Quantity</label>
@@ -1055,44 +1515,6 @@ export default function Dashboard({ user, onLogout, darkMode, onToggleDarkMode }
                   </aside>
                 );
               })()}
-            </div>
-          )}
-
-          {mainNav === 'orders' && (
-            <div className="p-3 sm:p-6 overflow-auto">
-              <div className={`rounded-lg border overflow-hidden ${darkMode ? 'border-slate-700 bg-slate-800' : 'border-gray-200 bg-white'}`}>
-                <h3 className="px-3 sm:px-4 py-3 font-semibold border-b border-gray-200 dark:border-slate-700">Orders</h3>
-                <div className="overflow-x-auto max-h-96 p-3 sm:p-4">
-                  <table className="w-full text-left text-sm min-w-[500px]">
-                    <thead>
-                      <tr className="border-b border-gray-200 dark:border-slate-600 text-gray-600 dark:text-slate-400">
-                        <th className="pb-2 pr-4">Time</th>
-                        <th className="pb-2 pr-4">Instrument</th>
-                        <th className="pb-2 pr-4">Side</th>
-                        <th className="pb-2 pr-4">Qty</th>
-                        <th className="pb-2 pr-4">Price</th>
-                        <th className="pb-2">Total</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {trades.length === 0 ? (
-                        <tr><td colSpan={6} className="py-4 text-gray-500 dark:text-slate-500">No orders yet</td></tr>
-                      ) : (
-                        [...trades].reverse().slice(0, 20).map((t) => (
-                          <tr key={t._id} className="border-b border-gray-100 dark:border-slate-700">
-                            <td className="py-1.5 pr-4 text-gray-600 dark:text-slate-400">{t.createdAt ? new Date(t.createdAt).toLocaleString() : '—'}</td>
-                            <td className="py-1.5 pr-4">{t.symbol}</td>
-                            <td className={`py-1.5 pr-4 font-medium ${t.side === 'buy' ? 'text-green-600 dark:text-emerald-400' : 'text-red-600 dark:text-red-400'}`}>{t.side}</td>
-                            <td className="py-1.5 pr-4">{t.quantity}</td>
-                            <td className="py-1.5 pr-4">{formatINR(t.price)}</td>
-                            <td className="py-1.5">{formatINR(t.totalAmount)}</td>
-                          </tr>
-                        ))
-                      )}
-                    </tbody>
-                  </table>
-                </div>
-              </div>
             </div>
           )}
 
@@ -1182,7 +1604,10 @@ export default function Dashboard({ user, onLogout, darkMode, onToggleDarkMode }
                       </tbody>
                     </table>
                   ) : (
-                    <p className="text-gray-500 dark:text-slate-500">No open positions. Place orders via the Order panel (Kite) or use Buy/Sell for demo.</p>
+                    <div className="flex flex-col items-center justify-center py-8 text-center">
+                      <p className="text-gray-500 dark:text-slate-500 mb-4">No open positions. Place orders via the Order panel (Kite) or use Buy/Sell for demo.</p>
+                      <button type="button" onClick={() => setFindInstrumentModalOpen(true)} className="px-5 py-2.5 rounded-lg font-semibold text-white bg-blue-600 hover:bg-blue-700 focus:ring-2 focus:ring-blue-500 focus:outline-none">Get started</button>
+                    </div>
                   )}
                 </div>
               </div>
@@ -1222,7 +1647,7 @@ export default function Dashboard({ user, onLogout, darkMode, onToggleDarkMode }
                   })()
                 ) : (
                   <>
-                    <p className="text-2xl font-bold">{portfolio ? formatINR(portfolio.user?.cashBalance) : '—'}</p>
+                <p className="text-2xl font-bold">{portfolio ? formatINR(portfolio.user?.cashBalance) : '—'}</p>
                     <p className="text-sm text-gray-500 dark:text-slate-400 mt-1">Available balance (app)</p>
                     <p className="text-xs text-gray-500 dark:text-slate-500 mt-2">Enable Kite for live margin</p>
                   </>
@@ -1235,7 +1660,7 @@ export default function Dashboard({ user, onLogout, darkMode, onToggleDarkMode }
                   <div className="flex rounded overflow-hidden border border-gray-300 dark:border-slate-600">
                     <button type="button" onClick={() => setTradingMode('paper')} className={`px-3 py-1.5 text-xs font-medium ${tradingMode === 'paper' ? 'bg-emerald-600 text-white' : darkMode ? 'bg-slate-700 text-slate-400' : 'bg-gray-100 text-gray-600'}`}>Paper</button>
                     <button type="button" onClick={() => setTradingMode('live')} className={`px-3 py-1.5 text-xs font-medium ${tradingMode === 'live' ? 'bg-emerald-600 text-white' : darkMode ? 'bg-slate-700 text-slate-400' : 'bg-gray-100 text-gray-600'}`}>Live (Kite)</button>
-                  </div>
+            </div>
                 </div>
                 {tradingMode === 'paper' ? (
                   <>
@@ -1252,7 +1677,7 @@ export default function Dashboard({ user, onLogout, darkMode, onToggleDarkMode }
                     <a href="https://console.zerodha.com/" target="_blank" rel="noopener noreferrer" className="text-sm text-blue-600 dark:text-blue-400 hover:underline">Zerodha Console</a>
                   </>
                 )}
-              </div>
+      </div>
 
               <div className={`rounded-lg border overflow-hidden ${darkMode ? 'border-slate-700 bg-slate-800' : 'border-gray-200 bg-white'}`}>
                 <h3 className="px-4 py-3 font-semibold border-b border-gray-200 dark:border-slate-700">Mutual fund holdings</h3>
@@ -1386,9 +1811,9 @@ export default function Dashboard({ user, onLogout, darkMode, onToggleDarkMode }
                       </div>
                     );
                   })()}
-                </>
-              )}
-            </div>
+                  </>
+                )}
+              </div>
           </div>
         </div>
       )}
@@ -1400,7 +1825,7 @@ export default function Dashboard({ user, onLogout, darkMode, onToggleDarkMode }
             <div className="sticky top-0 flex items-center justify-between p-3 sm:p-4 border-b border-gray-200 dark:border-slate-700 bg-inherit">
               <h2 className="text-base sm:text-lg font-semibold truncate pr-2">Market depth — {marketDepthSymbol.includes(':') ? marketDepthSymbol.split(':')[1] : marketDepthSymbol}</h2>
               <button type="button" onClick={() => setMarketDepthSymbol(null)} className="p-2 rounded hover:bg-gray-100 dark:hover:bg-slate-700 touch-manipulation">×</button>
-            </div>
+        </div>
             <div className="p-3 sm:p-4 overflow-x-auto">
               {marketDepthLoading ? (
                 <div className="py-6 text-center text-gray-500 dark:text-slate-400">Loading market depth…</div>
@@ -1506,46 +1931,6 @@ export default function Dashboard({ user, onLogout, darkMode, onToggleDarkMode }
           </div>
         </div>
       )}
-
-      {/* Collapsible Feed (optional) - keep for social */}
-      <details className="border-t border-gray-200 dark:border-slate-700 bg-white dark:bg-slate-800 shrink-0">
-        <summary className="cursor-pointer px-3 sm:px-4 py-2 text-sm font-medium text-gray-700 dark:text-slate-300 hover:bg-gray-50 dark:hover:bg-slate-700 touch-manipulation">Feed</summary>
-        <div className="max-h-64 overflow-auto border-t border-gray-100 dark:border-slate-700 p-3 sm:p-4">
-          <form onSubmit={handleCreatePost} className="mb-4">
-            <textarea
-              placeholder="Share a thought or strategy..."
-              value={postContent}
-              onChange={(e) => setPostContent(e.target.value)}
-              maxLength={2000}
-              rows={2}
-              className="mb-2 w-full rounded border border-gray-300 dark:border-slate-600 dark:bg-slate-700 dark:text-slate-100 p-2 text-sm"
-            />
-            <button type="submit" disabled={postLoading} className="rounded bg-indigo-600 px-3 py-1.5 text-sm text-white hover:bg-indigo-700">Post</button>
-          </form>
-          {feed.length === 0 ? (
-            <p className="text-sm text-gray-500 dark:text-slate-500">No posts yet.</p>
-          ) : (
-            feed.map((post) => (
-              <div key={post._id} className="border-b border-gray-100 dark:border-slate-700 py-3">
-                <p className="font-medium text-gray-800 dark:text-slate-200">{post.user?.name}</p>
-                <p className="text-sm text-gray-700 dark:text-slate-300">{post.content}</p>
-                <p className="mt-1 text-xs text-gray-500 dark:text-slate-500">{post.createdAt ? new Date(post.createdAt).toLocaleString() : ''}</p>
-                {commentByPost[post._id] === undefined && (
-                  <button type="button" onClick={() => loadComments(post._id)} className="mt-1 text-xs text-sky-600 dark:text-sky-400 hover:underline">View comments</button>
-                )}
-                {commentByPost[post._id] && (
-                  <>
-                    {commentByPost[post._id].map((c) => (
-                      <div key={c._id} className="ml-4 mt-2 text-sm text-slate-800 dark:text-slate-200"><strong>{c.user?.name}:</strong> {c.content}</div>
-                    ))}
-                    <CommentForm postId={post._id} onAdd={(content) => handleAddComment(post._id, content)} />
-                  </>
-                )}
-              </div>
-            ))
-          )}
-        </div>
-      </details>
     </div>
   );
 }

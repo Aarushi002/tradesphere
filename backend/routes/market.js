@@ -1,19 +1,18 @@
 import express from 'express';
 import { KiteConnect } from 'kiteconnect';
+import { getMarketDataToken } from '../src/lib/kiteToken.js';
 
 const router = express.Router();
 
 const apiKey = process.env.KITE_API_KEY;
-const accessToken = process.env.KITE_ACCESS_TOKEN;
 
-// Lazy-init Kite client
-let kite;
-function getKite() {
-  if (!kite) {
-    kite = new KiteConnect({ api_key: apiKey });
-    kite.setAccessToken(accessToken);
-  }
-  return kite;
+/** Single Kite client for market data. All users share real-time prices (paper trading app). */
+function getKiteForMarket() {
+  const accessToken = getMarketDataToken();
+  if (!apiKey || !accessToken) return null;
+  const kc = new KiteConnect({ api_key: apiKey });
+  kc.setAccessToken(accessToken);
+  return kc;
 }
 
 // Basic mapping for a few instruments. For production you should
@@ -78,34 +77,14 @@ function ensureInstrumentArray(data) {
   return [];
 }
 
-// Fallback list when Kite instruments API is unavailable or not yet loaded (includes sample NFO futures)
-const FALLBACK_INSTRUMENTS = [
-  { exchange: 'NSE', tradingsymbol: 'RELIANCE', name: 'Reliance Industries', instrument_type: 'EQ', segment: 'NSE' },
-  { exchange: 'NSE', tradingsymbol: 'TCS', name: 'Tata Consultancy Services', instrument_type: 'EQ', segment: 'NSE' },
-  { exchange: 'NSE', tradingsymbol: 'INFY', name: 'Infosys', instrument_type: 'EQ', segment: 'NSE' },
-  { exchange: 'NSE', tradingsymbol: 'HDFCBANK', name: 'HDFC Bank', instrument_type: 'EQ', segment: 'NSE' },
-  { exchange: 'NSE', tradingsymbol: 'NIFTY 50', name: 'Nifty 50', instrument_type: 'INDEX', segment: 'NSE' },
-  { exchange: 'BSE', tradingsymbol: 'SENSEX', name: 'SENSEX', instrument_type: 'INDEX', segment: 'BSE' },
-  { exchange: 'NSE', tradingsymbol: 'SBIN', name: 'State Bank of India', instrument_type: 'EQ', segment: 'NSE' },
-  { exchange: 'NSE', tradingsymbol: 'ICICIBANK', name: 'ICICI Bank', instrument_type: 'EQ', segment: 'NSE' },
-  { exchange: 'NSE', tradingsymbol: 'TATAMOTORS', name: 'Tata Motors', instrument_type: 'EQ', segment: 'NSE' },
-  { exchange: 'NSE', tradingsymbol: 'BHARTIARTL', name: 'Bharti Airtel', instrument_type: 'EQ', segment: 'NSE' },
-  { exchange: 'NFO', tradingsymbol: 'NIFTY24MARFUT', name: 'Nifty 50 Futures', instrument_type: 'FUT', segment: 'NFO' },
-  { exchange: 'NFO', tradingsymbol: 'BANKNIFTY24MARFUT', name: 'Bank Nifty Futures', instrument_type: 'FUT', segment: 'NFO' },
-  { exchange: 'NFO', tradingsymbol: 'FINNIFTY24MARFUT', name: 'Nifty Financial Services Futures', instrument_type: 'FUT', segment: 'NFO' },
-  { exchange: 'NSE', tradingsymbol: 'NIFTY BANK', name: 'Nifty Bank Index', instrument_type: 'INDEX', segment: 'NSE' },
-  { exchange: 'MCX', tradingsymbol: 'GOLDM24NOV', name: 'Gold Mini', instrument_type: 'FUT', segment: 'MCX' },
-  { exchange: 'MCX', tradingsymbol: 'SILVERM24DEC', name: 'Silver Mini', instrument_type: 'FUT', segment: 'MCX' },
-  { exchange: 'MCX', tradingsymbol: 'CRUDEOILM24NOV', name: 'Crude Oil Mini', instrument_type: 'FUT', segment: 'MCX' },
-];
-
+// Load from Kite using app-level market data token (no per-user linking).
 async function loadInstruments() {
   if (Date.now() - instrumentsCacheTime < INSTRUMENTS_CACHE_TTL_MS && instrumentsCache.length > 0) {
     return instrumentsCache;
   }
-  if (!apiKey || !accessToken) return FALLBACK_INSTRUMENTS;
+  if (!apiKey || !getMarketDataToken()) return instrumentsCache.length > 0 ? instrumentsCache : [];
   try {
-    const kc = getKite();
+    const kc = getKiteForMarket();
     const [nse, nfo, bse, mcx, mf] = await Promise.all([
       kc.getInstruments('NSE').then(ensureInstrumentArray).catch(() => []),
       kc.getInstruments('NFO').then(ensureInstrumentArray).catch(() => []),
@@ -137,7 +116,7 @@ async function loadInstruments() {
   } catch (e) {
     console.warn('[instruments] Kite load failed:', e?.message || e);
   }
-  return instrumentsCache.length > 0 ? instrumentsCache : FALLBACK_INSTRUMENTS;
+  return instrumentsCache.length > 0 ? instrumentsCache : [];
 }
 
 // Build search words: "nifty future" -> ["NIFTY", "FUTURE"]; map "FUTURE" -> also match "FUT", "OPTION" -> "CE","PE"
@@ -150,6 +129,45 @@ function searchWords(query) {
     if (w === 'OPTION' || w === 'OPTIONS') { expanded.push('CE'); expanded.push('PE'); }
   }
   return [...new Set(expanded)];
+}
+
+// Zerodha-style display for NFO options: "NIFTY 17th w MAR 23500 CE" and "17 MAR WEEKLY"
+function formatOptionZerodha(inst) {
+  if (!inst || (inst.exchange || '').toUpperCase() !== 'NFO') return null;
+  const type = (inst.instrument_type || '').toUpperCase();
+  if (type !== 'CE' && type !== 'PE') return null;
+  const ts = (inst.tradingsymbol || '').toUpperCase();
+  const months = ['JAN', 'FEB', 'MAR', 'APR', 'MAY', 'JUN', 'JUL', 'AUG', 'SEP', 'OCT', 'NOV', 'DEC'];
+  const ordinal = (n) => {
+    const d = n % 10;
+    const t = n % 100;
+    if (d === 1 && t !== 11) return n + 'st';
+    if (d === 2 && t !== 12) return n + 'nd';
+    if (d === 3 && t !== 13) return n + 'rd';
+    return n + 'th';
+  };
+  // Weekly (NSE format): UNDERLYING + YY + M + DD + STRIKE + CE/PE. M = 1-9 Jan-Sep, O=Oct, N=Nov, D=Dec
+  // e.g. NIFTY2631723500CE = NIFTY, 26, 3, 17, 23500, CE → 17 Mar 2026
+  const weeklyMatch = ts.match(/^(.+?)(\d{2})([1-9OND])(\d{2})(\d+)(CE|PE)$/);
+  if (weeklyMatch) {
+    const [, underlying, yy, mChar, dd, strike, optType] = weeklyMatch;
+    const monthNum = { '1': 1, '2': 2, '3': 3, '4': 4, '5': 5, '6': 6, '7': 7, '8': 8, '9': 9, 'O': 10, 'N': 11, 'D': 12 }[mChar];
+    const dayNum = parseInt(dd, 10);
+    if (!monthNum || dayNum < 1 || dayNum > 31) return null;
+    const mon = months[monthNum - 1];
+    const displayName = `${underlying} ${ordinal(dayNum)} w ${mon} ${strike} ${optType}`;
+    const expiryLabel = `${dayNum} ${mon} WEEKLY`;
+    return { display_name: displayName, expiry_label: expiryLabel };
+  }
+  // Monthly: UNDERLYING + YY + MON + STRIKE + CE/PE e.g. NIFTY26MAR23500CE
+  const monthlyMatch = ts.match(/^(.+?)(\d{2})(JAN|FEB|MAR|APR|MAY|JUN|JUL|AUG|SEP|OCT|NOV|DEC)(\d+)(CE|PE)$/);
+  if (monthlyMatch) {
+    const [, underlying, yy, mon, strike, optType] = monthlyMatch;
+    const displayName = `${underlying} ${yy} ${mon} ${strike} ${optType}`;
+    const expiryLabel = `${yy} ${mon} MONTHLY`;
+    return { display_name: displayName, expiry_label: expiryLabel };
+  }
+  return null;
 }
 
 // Score for sorting: exact symbol > symbol starts with > all words in symbol/name > partial
@@ -171,14 +189,15 @@ function scoreInstrument(inst, words, fullQuery) {
   return partial ? 200 : 0;
 }
 
-// GET /api/market/instruments/search?q=rel&limit=500
-// Zerodha-like: return all matches from instrument database (cap 2000 for safety)
+// GET /api/market/instruments/search?q=rel&limit=1000&offset=0
+// Returns ALL matches (NSE, BSE, NFO futures/options, MCX). Uses app-level market data token.
 router.get('/instruments/search', async (req, res) => {
   try {
     const q = (req.query.q || '').toString().trim();
-    const limit = Math.min(parseInt(req.query.limit, 10) || 500, 2000);
+    const limit = Math.min(Math.max(1, parseInt(req.query.limit, 10) || 1000), 15000);
+    const offset = Math.max(0, parseInt(req.query.offset, 10) || 0);
     if (!q || q.length < 1) {
-      return res.json({ suggestions: [] });
+      return res.json({ suggestions: [], total: 0 });
     }
     const list = await loadInstruments();
     const fullQuery = q.replace(/\s+/g, ' ').trim().toUpperCase();
@@ -195,6 +214,7 @@ router.get('/instruments/search', async (req, res) => {
       return sym.includes(words[0]) || name.includes(words[0]);
     });
     filtered.sort((a, b) => scoreInstrument(b, words, fullQuery) - scoreInstrument(a, words, fullQuery));
+    const total = filtered.length;
     const segmentLabel = (inst) => {
       const ex = (inst.exchange || '').toUpperCase();
       const type = (inst.instrument_type || '').toUpperCase();
@@ -206,17 +226,25 @@ router.get('/instruments/search', async (req, res) => {
       if (ex === 'MF') return 'Mutual Fund';
       return ex || 'Market';
     };
-    const slice = filtered.slice(0, limit).map((inst) => ({
-      exchange: inst.exchange,
-      tradingsymbol: inst.tradingsymbol,
-      name: inst.name || inst.tradingsymbol,
-      instrument_type: inst.instrument_type || 'EQ',
-      segment: inst.segment,
-      instrument_token: inst.instrument_token,
-      key: `${inst.exchange}:${inst.tradingsymbol}`,
-      segment_label: segmentLabel(inst),
-    }));
-    res.json({ suggestions: slice });
+    const slice = filtered.slice(offset, offset + limit).map((inst) => {
+      const base = {
+        exchange: inst.exchange,
+        tradingsymbol: inst.tradingsymbol,
+        name: inst.name || inst.tradingsymbol,
+        instrument_type: inst.instrument_type || 'EQ',
+        segment: inst.segment,
+        instrument_token: inst.instrument_token,
+        key: `${inst.exchange}:${inst.tradingsymbol}`,
+        segment_label: segmentLabel(inst),
+      };
+      const zerodha = formatOptionZerodha(inst);
+      if (zerodha) {
+        base.zerodha_display_name = zerodha.display_name;
+        base.zerodha_expiry_label = zerodha.expiry_label;
+      }
+      return base;
+    });
+    res.json({ suggestions: slice, total });
   } catch (err) {
     console.error('Error searching instruments', err?.message || err);
     res.status(500).json({ error: err?.message || 'Search failed' });
@@ -224,13 +252,14 @@ router.get('/instruments/search', async (req, res) => {
 });
 
 // GET /api/market/quotes?symbols=NIFTY 50,SENSEX,RELIANCE,TCS,...
-// Returns real-time LTP and day change for indices and stocks (from Kite).
+// Real-time LTP and day change. Uses app-level Kite connection (paper trading: one data source for all users).
 router.get('/quotes', async (req, res) => {
   try {
-    if (!apiKey || !accessToken) {
+    if (!apiKey || !getMarketDataToken()) {
       return res.status(503).json({
         error: 'Market data unavailable',
-        message: 'Set KITE_API_KEY and KITE_ACCESS_TOKEN in backend .env for real-time quotes.',
+        message: 'Administrator: set KITE_ACCESS_TOKEN or connect Kite once for market data.',
+        code: 'KITE_SESSION_EXPIRED',
       });
     }
     const raw = req.query.symbols;
@@ -253,7 +282,7 @@ router.get('/quotes', async (req, res) => {
     if (keys.length === 0) {
       return res.json({ data: [] });
     }
-    const kc = getKite();
+    const kc = getKiteForMarket();
     const response = await kc.getQuote(keys);
     const data = [];
     // Kite library returns the inner "data" object directly (not { data: {...} })
@@ -293,7 +322,7 @@ router.get('/quotes', async (req, res) => {
   }
 });
 
-// Resolve symbol (e.g. RELIANCE or NSE:RELIANCE) to Kite instrument_token using cache or fallback map
+// Resolve symbol to Kite instrument_token using instruments cache or static map
 async function getInstrumentToken(symbol) {
   const raw = (symbol || '').toString().trim();
   if (!raw) return null;
@@ -304,6 +333,24 @@ async function getInstrumentToken(symbol) {
   const found = list.find((inst) => `${inst.exchange}:${inst.tradingsymbol}` === key);
   if (found && found.instrument_token != null) return Number(found.instrument_token);
   return fallbackToken || null;
+}
+
+// Format Date as yyyy-mm-dd hh:mm:ss for Kite historical API (IST)
+function formatKiteDateTime(date) {
+  const d = new Date(date);
+  const f = new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'Asia/Kolkata',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+    hour12: false,
+  });
+  const parts = f.formatToParts(d);
+  const get = (type) => parts.find((p) => p.type === type)?.value ?? '00';
+  return `${get('year')}-${get('month')}-${get('day')} ${get('hour')}:${get('minute')}:${get('second')}`;
 }
 
 // Map range to { from, to, interval } for Kite getHistoricalData
@@ -360,10 +407,10 @@ router.get('/option-chain', async (req, res) => {
     if (!rawSymbol) {
       return res.status(400).json({ error: 'symbol is required (e.g. NIFTY50, NIFTY BANK)' });
     }
-    if (!apiKey || !accessToken) {
+    if (!apiKey || !getMarketDataToken()) {
       return res.status(503).json({
         error: 'Market data unavailable',
-        message: 'Set KITE_API_KEY and KITE_ACCESS_TOKEN for option chain.',
+        message: 'Administrator: configure Kite for market data.',
       });
     }
 
@@ -421,7 +468,7 @@ router.get('/option-chain', async (req, res) => {
       return res.json({ symbol: rawSymbol, underlying, expiries, selectedExpiry, chain: [] });
     }
 
-    const kc = getKite();
+    const kc = getKiteForMarket();
     const quoteResponse = await kc.getQuote(keys);
     const quoteMap = quoteResponse && typeof quoteResponse === 'object' && !Array.isArray(quoteResponse) ? quoteResponse : {};
 
@@ -481,19 +528,21 @@ router.get('/candles', async (req, res) => {
 
     const { from, to, interval } = getRangeParams(range);
 
-    if (!apiKey || !accessToken) {
+    if (!apiKey || !getMarketDataToken()) {
       return res.status(503).json({
         error: 'Market data unavailable',
-        message: 'Set KITE_API_KEY and KITE_ACCESS_TOKEN for historical charts.',
+        message: 'Administrator: configure Kite for market data.',
       });
     }
 
-    const kc = getKite();
+    const kc = getKiteForMarket();
+    const fromStr = formatKiteDateTime(from);
+    const toStr = formatKiteDateTime(to);
     const candles = await kc.getHistoricalData(
       token,
       interval,
-      from.toISOString(),
-      to.toISOString(),
+      fromStr,
+      toStr,
       false,
       false
     );
@@ -518,24 +567,23 @@ router.get('/candles', async (req, res) => {
 });
 
 // GET /api/market/market-depth?symbol=RELIANCE (or NSE:RELIANCE)
-// Returns order book (bid/ask depth) from Kite getQuote. Depth has 5 levels each for buy and sell.
 router.get('/market-depth', async (req, res) => {
   try {
     const raw = (req.query.symbol || '').toString().trim();
     if (!raw) {
       return res.status(400).json({ error: 'symbol is required (e.g. RELIANCE or NSE:RELIANCE)' });
     }
-    if (!apiKey || !accessToken) {
+    if (!apiKey || !getMarketDataToken()) {
       return res.status(503).json({
         error: 'Market data unavailable',
-        message: 'Set KITE_API_KEY and KITE_ACCESS_TOKEN in backend .env for live market depth.',
+        message: 'Administrator: configure Kite for market data.',
       });
     }
     const key = raw.includes(':') ? raw : toKiteInstrumentKey(raw);
     if (!key) {
       return res.status(400).json({ error: 'Could not resolve instrument key' });
     }
-    const kc = getKite();
+    const kc = getKiteForMarket();
     const response = await kc.getQuote([key]);
     const quote = response && response[key];
     if (!quote) {

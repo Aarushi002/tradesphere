@@ -2,32 +2,33 @@
 import React, { useEffect, useRef } from 'react';
 import * as LightweightCharts from 'lightweight-charts';
 
-const PriceChart = ({ data }) => {
+const PriceChart = ({ data, darkMode = true, lastPrice }) => {
   const chartContainerRef = useRef(null);
   const chartRef = useRef(null);
   const seriesRef = useRef(null);
+  const lineSeriesRef = useRef(null);
 
   useEffect(() => {
     if (!chartContainerRef.current) return;
 
     const el = chartContainerRef.current;
-    // Create chart instance (use container dimensions for responsive height)
+    const isDark = !!darkMode;
     chartRef.current = LightweightCharts.createChart(el, {
       width: el.clientWidth,
       height: el.clientHeight || 300,
       layout: {
-        background: { color: '#111827' },
-        textColor: '#e5e7eb',
+        background: { color: isDark ? '#111827' : '#ffffff' },
+        textColor: isDark ? '#e5e7eb' : '#374151',
       },
       grid: {
-        vertLines: { color: '#1f2933' },
-        horzLines: { color: '#1f2933' },
+        vertLines: { color: isDark ? '#1f2933' : '#e5e7eb' },
+        horzLines: { color: isDark ? '#1f2933' : '#e5e7eb' },
       },
       rightPriceScale: {
-        borderColor: '#374151',
+        borderColor: isDark ? '#374151' : '#d1d5db',
       },
       timeScale: {
-        borderColor: '#374151',
+        borderColor: isDark ? '#374151' : '#d1d5db',
       },
     });
 
@@ -43,6 +44,14 @@ const PriceChart = ({ data }) => {
         wickDownColor: '#dc2626',
       }
     );
+
+    // Line series for real-time LTP (optional)
+    lineSeriesRef.current = chartRef.current.addSeries(LightweightCharts.LineSeries, {
+      color: '#f59e0b',
+      lineWidth: 2,
+      priceLineVisible: true,
+      lastValueVisible: true,
+    });
 
     // Resize chart on container resize
     const handleResize = () => {
@@ -62,14 +71,14 @@ const PriceChart = ({ data }) => {
       if (chartRef.current) {
         chartRef.current.remove();
       }
+      lineSeriesRef.current = null;
     };
-  }, []);
+  }, [darkMode]);
 
-  // Whenever data changes, update the series and fit view to remove empty space
+  // Whenever data or theme changes, update candlestick series and fit view
   useEffect(() => {
     if (!seriesRef.current || !chartRef.current || !data || data.length === 0) return;
     seriesRef.current.setData(data);
-    // Fit time scale to the actual data range so no empty space on left/right
     requestAnimationFrame(() => {
       if (chartRef.current) {
         try {
@@ -77,7 +86,19 @@ const PriceChart = ({ data }) => {
         } catch (_) {}
       }
     });
-  }, [data]);
+  }, [data, darkMode]);
+
+  // Real-time LTP line: only when lastPrice is provided (full-screen live chart)
+  useEffect(() => {
+    if (!lineSeriesRef.current || !chartRef.current || !data || data.length === 0) return;
+    if (typeof lastPrice === 'number' && !Number.isNaN(lastPrice)) {
+      const lineData = data.map((c) => ({ time: c.time, value: c.close }));
+      lineData[lineData.length - 1] = { time: data[data.length - 1].time, value: lastPrice };
+      lineSeriesRef.current.setData(lineData);
+    } else {
+      lineSeriesRef.current.setData([]);
+    }
+  }, [data, lastPrice]);
 
   return (
     <div

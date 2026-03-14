@@ -1,35 +1,126 @@
+import crypto from 'crypto';
 import express from 'express';
 import { KiteConnect } from 'kiteconnect';
 import { auth } from '../middleware/auth.js';
+import { optionalAuth } from '../middleware/auth.js';
+import { getAccessToken, setAccessToken, getMarketDataToken, setMarketDataToken } from '../src/lib/kiteToken.js';
 
 const router = express.Router();
 
 const apiKey = process.env.KITE_API_KEY;
-const accessToken = process.env.KITE_ACCESS_TOKEN;
+const apiSecret = process.env.KITE_API_SECRET;
 
-let kite;
-function getKite() {
-  if (!kite) {
-    kite = new KiteConnect({ api_key: apiKey });
-    kite.setAccessToken(accessToken);
-  }
-  return kite;
+function getKite(userId) {
+  const accessToken = getAccessToken(userId);
+  if (!apiKey || !accessToken) return null;
+  const kc = new KiteConnect({ api_key: apiKey });
+  kc.setAccessToken(accessToken);
+  return kc;
 }
 
 function requireKite(req, res, next) {
-  if (!apiKey || !accessToken) {
+  if (!apiKey) {
     return res.status(503).json({
       error: 'Kite not configured',
-      message: 'Set KITE_API_KEY and KITE_ACCESS_TOKEN in backend .env',
+      message: 'Set KITE_API_KEY (and KITE_API_SECRET) in backend .env',
+    });
+  }
+  if (!getAccessToken(req.userId)) {
+    return res.status(503).json({
+      error: 'Link your Zerodha account',
+      message: 'For real trading only. Paper trading uses app data.',
+      code: 'KITE_SESSION_EXPIRED',
     });
   }
   next();
 }
 
+// GET /api/kite/login - No auth: state=market (app-level market data for paper trading). With auth: state=userId (per-user for real broker).
+router.get('/login', optionalAuth, (req, res) => {
+  if (!apiKey) {
+    return res.status(503).json({ error: 'Set KITE_API_KEY in backend .env' });
+  }
+  const statePlain = req.userId ? String(req.userId) : 'market';
+  const stateB64 = Buffer.from(statePlain, 'utf8').toString('base64').replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+  const url = `https://kite.zerodha.com/connect/login?v=3&api_key=${encodeURIComponent(apiKey)}&state=${encodeURIComponent(stateB64)}`;
+  res.redirect(302, url);
+});
+
+// GET /api/kite/callback - state=market → set global market data token; else state=userId → set per-user token
+router.get('/callback', async (req, res) => {
+  const requestToken = (req.query.request_token || '').toString().trim();
+  const stateRaw = (req.query.state || '').toString().trim();
+  const frontendUrl = process.env.KITE_FRONTEND_URL || process.env.FRONTEND_URL || 'http://localhost:3000';
+
+  if (!apiKey || !apiSecret) {
+    return res.redirect(`${frontendUrl}?kite_error=missing_api_secret`);
+  }
+  if (!requestToken) {
+    return res.redirect(`${frontendUrl}?kite_error=missing_request_token`);
+  }
+
+  let stateValue = null;
+  if (stateRaw) {
+    try {
+      const b64 = stateRaw.replace(/-/g, '+').replace(/_/g, '/');
+      stateValue = Buffer.from(b64, 'base64').toString('utf8');
+    } catch (_) {}
+  }
+  if (!stateValue) {
+    return res.redirect(`${frontendUrl}?kite_error=invalid_state`);
+  }
+
+  const checksum = crypto.createHash('sha256').update(apiKey + requestToken + apiSecret).digest('hex');
+  const body = new URLSearchParams({
+    api_key: apiKey,
+    request_token: requestToken,
+    checksum,
+  }).toString();
+
+  try {
+    const response = await fetch('https://api.kite.trade/session/token', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/x-www-form-urlencoded',
+        'X-Kite-Version': '3',
+      },
+      body,
+    });
+    const json = await response.json();
+    const accessToken = json?.data?.access_token || json?.access_token;
+
+    if (accessToken) {
+      if (stateValue === 'market') {
+        setMarketDataToken(accessToken);
+        console.log('[kite] Market data token set (app-level). All users will see real-time data.');
+      } else {
+        setAccessToken(stateValue, accessToken);
+        console.log('[kite] Access token set for user', stateValue);
+      }
+      return res.redirect(`${frontendUrl}?kite_refreshed=1`);
+    }
+    const errMsg = json?.message || json?.error_type || 'Unknown error';
+    return res.redirect(`${frontendUrl}?kite_error=${encodeURIComponent(errMsg)}`);
+  } catch (err) {
+    console.error('[kite] Callback error', err?.message || err);
+    return res.redirect(`${frontendUrl}?kite_error=${encodeURIComponent(err?.message || 'Request failed')}`);
+  }
+});
+
+// GET /api/kite/status - Market data: no auth, returns whether app has Kite connected for real-time data
+router.get('/status', (req, res) => {
+  const hasMarketData = !!getMarketDataToken();
+  res.json({
+    configured: !!apiKey,
+    hasSession: hasMarketData,
+    loginUrl: apiKey ? `/api/kite/login` : null,
+  });
+});
+
 // GET /api/kite/positions - live positions from Kite
 router.get('/positions', auth, requireKite, async (req, res) => {
   try {
-    const kc = getKite();
+    const kc = getKite(req.userId);
     const data = await kc.getPositions();
     const positions = (data && data.net) ? data.net : [];
     res.json({ positions: Array.isArray(positions) ? positions : [] });
@@ -45,7 +136,7 @@ router.get('/positions', auth, requireKite, async (req, res) => {
 // GET /api/kite/orders - live orders from Kite
 router.get('/orders', auth, requireKite, async (req, res) => {
   try {
-    const kc = getKite();
+    const kc = getKite(req.userId);
     const data = await kc.getOrders();
     const orders = Array.isArray(data) ? data : (data && data.data ? data.data : []);
     res.json({ orders: Array.isArray(orders) ? orders : [] });
@@ -61,7 +152,7 @@ router.get('/orders', auth, requireKite, async (req, res) => {
 // GET /api/kite/margins - equity/commodity margins
 router.get('/margins', auth, requireKite, async (req, res) => {
   try {
-    const kc = getKite();
+    const kc = getKite(req.userId);
     const segment = req.query.segment || '';
     const data = segment ? await kc.getMargins(segment) : await kc.getMargins();
     res.json(data || {});
@@ -144,7 +235,7 @@ router.post('/order', auth, requireKite, async (req, res) => {
     if (trigger_price != null) params.trigger_price = Number(trigger_price);
     if (disclosed_quantity != null) params.disclosed_quantity = Math.floor(Number(disclosed_quantity));
 
-    const kc = getKite();
+    const kc = getKite(req.userId);
     const result = await kc.placeOrder(variety, params);
     res.status(201).json({
       message: 'Order placed',
@@ -165,7 +256,7 @@ router.post('/order', auth, requireKite, async (req, res) => {
 // GET /api/kite/mf/holdings
 router.get('/mf/holdings', auth, requireKite, async (req, res) => {
   try {
-    const kc = getKite();
+    const kc = getKite(req.userId);
     const data = await kc.getMFHoldings();
     const list = Array.isArray(data) ? data : (data?.data || []);
     res.json({ holdings: list });
@@ -178,7 +269,7 @@ router.get('/mf/holdings', auth, requireKite, async (req, res) => {
 // GET /api/kite/mf/orders
 router.get('/mf/orders', auth, requireKite, async (req, res) => {
   try {
-    const kc = getKite();
+    const kc = getKite(req.userId);
     const orderId = req.query.order_id;
     const data = orderId ? await kc.getMFOrders(orderId) : await kc.getMFOrders();
     const list = Array.isArray(data) ? data : (data?.data ? (Array.isArray(data.data) ? data.data : [data.data]) : []);
@@ -192,7 +283,7 @@ router.get('/mf/orders', auth, requireKite, async (req, res) => {
 // GET /api/kite/mf/sips
 router.get('/mf/sips', auth, requireKite, async (req, res) => {
   try {
-    const kc = getKite();
+    const kc = getKite(req.userId);
     const data = await kc.getMFSIPS();
     const list = Array.isArray(data) ? data : (data?.data || []);
     res.json({ sips: list });
@@ -222,7 +313,7 @@ router.post('/mf/order', auth, requireKite, async (req, res) => {
       params.quantity = qty;
     }
     if (tag != null) params.tag = String(tag).slice(0, 8);
-    const kc = getKite();
+    const kc = getKite(req.userId);
     const result = await kc.placeMFOrder(params);
     res.status(201).json({ message: 'MF order placed', data: result });
   } catch (err) {

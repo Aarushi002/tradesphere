@@ -38,17 +38,35 @@ Backend for paper trading (simulated buy/sell), portfolio, and optional live dat
 
 ## Zerodha-like live data (optional)
 
-For live candles and real-time prices you need Zerodha Kite API:
+For live candles and real-time prices you need Zerodha Kite API.
+
+### One-time setup
 
 1. Add to `.env`:
    ```env
    KITE_API_KEY=your_kite_api_key
+   KITE_API_SECRET=your_kite_api_secret
    KITE_ACCESS_TOKEN=your_access_token
+   FRONTEND_URL=http://localhost:3000
    ```
-2. Get an access token using the script (after logging in via Kite):
+2. In [Kite developer console](https://developers.kite.trade/), set your app’s **Redirect URL** to:
+   - Local: `http://localhost:5000/api/kite/callback`
+   - Production: `https://your-backend-domain.com/api/kite/callback`
+3. (Optional) Get the first token manually:
    ```bash
-   node scripts/getKiteAccessToken.js
+   node scripts/get-kite-token.js <request_token>
    ```
-3. Backend will use these for `/api/market/candles`. Only symbols configured in `routes/market.js` (e.g. NIFTY50, RELIANCE) will return live data.
+   Get `request_token` from the redirect URL after logging in at the Kite connect URL.
+
+### Daily refresh (automated)
+
+Access tokens expire daily. You can refresh without editing `.env`:
+
+1. In the app, when you see **Sample data**, click **Refresh Kite session**.
+2. You are redirected to Kite → log in → redirected back to the app.
+3. The new token is saved to `backend/.kite-token` and used immediately (no restart).
+4. On the next backend restart, the token is read from `.kite-token` if present.
+
+So you only need to click **Refresh Kite session** once per day (e.g. at market open) instead of copying tokens manually.
 
 **Note:** This app is for **paper/simulated trading**. Real brokerage like Zerodha requires their API terms, KYC, and compliance. TradeSphere does not execute real orders on exchanges.
