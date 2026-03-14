@@ -45,12 +45,15 @@ app.use((req, res) => {
 const PORT = process.env.PORT || 5000;
 const MONGO_URI = process.env.MONGO_URI || 'mongodb://localhost:27017/tradesphere';
 
-async function start() {
-  try {
-    await mongoose.connect(MONGO_URI);
-    console.log('MongoDB connected');
+// Start HTTP server first so Render sees the app as "live" (avoids stuck "Application loading")
+app.listen(PORT, () => {
+  console.log(`Server running on port ${PORT}`);
+});
 
-    // Restore Kite config and market token from DB so no env vars needed (fully automated setup)
+// Connect to MongoDB in background so a slow/failed DB doesn't block the server from starting
+mongoose.connect(MONGO_URI)
+  .then(async () => {
+    console.log('MongoDB connected');
     try {
       const Setting = (await import('../models/Setting.js')).default;
       const { setMarketDataToken, setKiteConfig } = await import('./lib/kiteToken.js');
@@ -68,15 +71,9 @@ async function start() {
     } catch (e) {
       // ignore if Setting model or token missing
     }
-
-    app.listen(PORT, () => {
-      console.log(`Server running on port ${PORT}`);
-    });
-  } catch (err) {
-    console.error('Failed to start server', err);
-    process.exit(1);
-  }
-}
-
-start();
+  })
+  .catch((err) => {
+    console.error('MongoDB connection failed:', err.message);
+    // Server is already listening; API routes that need DB will fail until MONGO_URI is fixed
+  });
 

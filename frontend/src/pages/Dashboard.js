@@ -756,9 +756,9 @@ export default function Dashboard({ user, onLogout, darkMode, onToggleDarkMode }
                 <span className={darkMode ? 'text-slate-400' : 'text-gray-600'}>{idx.name}</span>
                 <span className={darkMode ? 'text-slate-100' : 'text-gray-900'}>{Number(idx.value).toLocaleString('en-IN', { minimumFractionDigits: 2 })}</span>
                 <span className={idx.change < 0 ? 'text-red-600 dark:text-red-400' : 'text-green-600 dark:text-green-400'}>
-                  {idx.change >= 0 ? '+' : ''}{idx.change} ({idx.changePercent}%)
-                </span>
-              </div>
+                {idx.change >= 0 ? '+' : ''}{idx.change} ({idx.changePercent}%)
+              </span>
+            </div>
             )) : quotesApiUnavailable && !kiteAutoConnecting ? (
               <span className="text-xs text-amber-600 dark:text-amber-400 shrink-0">Enabling live indices…</span>
             ) : null}
@@ -776,7 +776,7 @@ export default function Dashboard({ user, onLogout, darkMode, onToggleDarkMode }
             </select>
             <button type="button" onClick={addWatchlistGroup} className="text-xs font-medium text-blue-600 dark:text-blue-400 hover:underline px-2 py-1.5">NEW</button>
             <button type="button" onClick={() => setWatchlistFilterOpen((o) => !o)} className="p-1.5 rounded hover:bg-gray-100 dark:hover:bg-slate-700" title="Layout">▦</button>
-          </div>
+        </div>
         </div>
         <div className="flex items-center gap-0.5 sm:gap-1 shrink-0 min-w-0">
           <div className="hidden md:flex items-center border-b-2 border-transparent" style={{ marginBottom: -1 }}>
@@ -979,9 +979,9 @@ export default function Dashboard({ user, onLogout, darkMode, onToggleDarkMode }
             <div className="p-4 border-t border-gray-200 dark:border-slate-600 shrink-0 flex justify-end">
               <button type="button" onClick={() => { setFindInstrumentModalOpen(false); setFindInstrumentQuery(''); setFindInstrumentSuggestions([]); }} className="px-4 py-2 rounded-lg font-medium border border-gray-300 dark:border-slate-600 bg-white dark:bg-slate-700 text-gray-700 dark:text-slate-200 hover:bg-gray-50 dark:hover:bg-slate-600">
                 Close
-              </button>
-            </div>
+            </button>
           </div>
+        </div>
         </div>
       )}
 

@@ -571,7 +571,7 @@ router.get('/candles', async (req, res) => {
     const hasKite = getKiteApiKey() && getMarketDataToken();
     if (hasKite) {
       const token = await getInstrumentToken(symbol);
-      if (!token) {
+    if (!token) {
         return res.status(400).json({ error: 'Unsupported symbol. Add to watchlist or use NSE:SYMBOL.' });
       }
       const kc = getKiteForMarket();
