@@ -20,7 +20,8 @@
     "jsonwebtoken": "^9.0.3",
     "kiteconnect": "^5.1.0",
     "mongoose": "^9.3.0",
-    "morgan": "^1.10.1"
+    "morgan": "^1.10.1",
+    "yahoo-finance2": "^3.13.2"
   },
   "devDependencies": {
     "nodemon": "^3.1.14"

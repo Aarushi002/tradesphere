@@ -39,15 +39,21 @@ async function start() {
     await mongoose.connect(MONGO_URI);
     console.log('MongoDB connected');
 
-    // Restore Kite market data token from DB so live data survives restarts (e.g. on Render)
+    // Restore Kite config and market token from DB so no env vars needed (fully automated setup)
     try {
       const Setting = (await import('../models/Setting.js')).default;
-      const doc = await Setting.findOne({ key: 'kite_market_token' });
-      if (doc && doc.value) {
-        const { setMarketDataToken } = await import('./lib/kiteToken.js');
-        setMarketDataToken(doc.value);
+      const { setMarketDataToken, setKiteConfig } = await import('./lib/kiteToken.js');
+      const docs = await Setting.find({ key: { $in: ['kite_api_key', 'kite_api_secret', 'frontend_url', 'kite_market_token'] } });
+      const byKey = {};
+      docs.forEach((d) => { if (d && d.key) byKey[d.key] = d.value; });
+      if (byKey.kite_api_key) setKiteConfig({ apiKey: byKey.kite_api_key });
+      if (byKey.kite_api_secret) setKiteConfig({ apiSecret: byKey.kite_api_secret });
+      if (byKey.frontend_url) setKiteConfig({ frontendUrl: byKey.frontend_url });
+      if (byKey.kite_market_token) {
+        setMarketDataToken(byKey.kite_market_token);
         console.log('[kite] Restored market data token from DB');
       }
+      if (byKey.kite_api_key) console.log('[kite] Loaded API config from DB');
     } catch (e) {
       // ignore if Setting model or token missing
     }

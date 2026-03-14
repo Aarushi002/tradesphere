@@ -164,6 +164,12 @@ export default function Dashboard({ user, onLogout, darkMode, onToggleDarkMode }
   const [quotesApiUnavailable, setQuotesApiUnavailable] = useState(false); // true when backend returns 503 (Kite not configured)
   const [kiteRefreshMessage, setKiteRefreshMessage] = useState(null); // 'success' | error string after redirect from Kite callback
   const [kiteAutoConnecting, setKiteAutoConnecting] = useState(false); // true when redirecting to Kite to enable live data (no manual "Connect Kite" step)
+  const [kiteSetupOpen, setKiteSetupOpen] = useState(false); // one-time setup: paste API key/secret, no env vars needed
+  const [kiteRedirectUrl, setKiteRedirectUrl] = useState(''); // URL to add in Kite developer console
+  const [kiteSetupApiKey, setKiteSetupApiKey] = useState('');
+  const [kiteSetupApiSecret, setKiteSetupApiSecret] = useState('');
+  const [kiteSetupSaving, setKiteSetupSaving] = useState(false);
+  const [kiteSetupError, setKiteSetupError] = useState('');
   const kiteRedirectDoneRef = useRef(false);
   const [searchSuggestions, setSearchSuggestions] = useState([]);
   const [searchSuggestionsTotal, setSearchSuggestionsTotal] = useState(0);
@@ -404,16 +410,30 @@ export default function Dashboard({ user, onLogout, darkMode, onToggleDarkMode }
     }
   }, []);
 
-  // Auto-connect Kite for live data when user is logged in and app has no market token (no manual "Connect Kite" step)
+  // Auto-connect Kite for live data: if not configured show one-time setup; else capture frontend URL and redirect to Kite
   useEffect(() => {
     if (!getToken() || kiteRedirectDoneRef.current) return;
     fetch(`${API_URL}/api/kite/status`)
       .then((res) => res.ok ? res.json() : Promise.reject())
       .then((data) => {
-        if (data.configured && !data.hasSession) {
+        if (data.redirectUrlToAddInKite) setKiteRedirectUrl(data.redirectUrlToAddInKite);
+        if (!data.configured) {
+          setKiteSetupOpen(true);
+          return;
+        }
+        if (!data.hasSession) {
           kiteRedirectDoneRef.current = true;
           setKiteAutoConnecting(true);
-          window.location.href = `${API_URL}/api/kite/login?for=market`;
+          // Auto-capture frontend URL so backend knows where to redirect after Kite login (no FRONTEND_URL env needed)
+          fetch(`${API_URL}/api/kite/set-redirect-origin`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ origin: window.location.origin }),
+          })
+            .catch(() => {})
+            .finally(() => {
+              window.location.href = `${API_URL}/api/kite/login?for=market`;
+            });
         }
       })
       .catch(() => {});
@@ -969,6 +989,73 @@ export default function Dashboard({ user, onLogout, darkMode, onToggleDarkMode }
           Kite login failed: {kiteRefreshMessage}
         </div>
       )}
+      {/* One-time Kite setup: open console, copy URL, paste key/secret — maximum automation (redirect URL must be added manually in Kite; no API exists) */}
+      {kiteSetupOpen && (
+        <div className="fixed inset-0 z-[110] flex items-center justify-center p-4 overflow-y-auto">
+          <div className="absolute inset-0 bg-black/50" onClick={() => setKiteSetupOpen(false)} aria-hidden="true" />
+          <div className={`relative w-full max-w-md rounded-xl shadow-xl p-6 ${darkMode ? 'bg-slate-800' : 'bg-white'}`} onClick={(e) => e.stopPropagation()}>
+            <h3 className="text-lg font-semibold text-gray-900 dark:text-slate-100 mb-1">One-time setup: Live market data</h3>
+            <p className="text-xs text-gray-500 dark:text-slate-400 mb-4">All steps happen in the Kite developer console we open for you.</p>
+
+            <div className="space-y-4 mb-4">
+              <div>
+                <span className="text-xs font-semibold text-gray-700 dark:text-slate-300">Step 1 — Add redirect URL</span>
+                <p className="text-xs text-gray-500 dark:text-slate-400 mt-0.5 mb-1">Open Kite, create an app if needed, then paste the URL below into your app’s “Redirect URL” field.</p>
+                <div className="flex gap-2">
+                  <code className={`flex-1 min-w-0 truncate rounded px-2 py-1.5 text-xs ${darkMode ? 'bg-slate-700 text-slate-200' : 'bg-gray-100 text-gray-800'}`} title={kiteRedirectUrl}>{kiteRedirectUrl || '…'}</code>
+                  <button type="button" onClick={() => { try { navigator.clipboard.writeText(kiteRedirectUrl); } catch (_) {} }} className="shrink-0 px-2 py-1.5 rounded border border-gray-300 dark:border-slate-600 text-xs font-medium">Copy</button>
+                </div>
+                <a href="https://developers.kite.trade" target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-1 mt-2 text-xs font-medium text-blue-600 dark:text-blue-400 hover:underline">
+                  Open Kite developer console →
+                </a>
+              </div>
+
+              <div>
+                <span className="text-xs font-semibold text-gray-700 dark:text-slate-300">Step 2 — Paste API key & secret</span>
+                <p className="text-xs text-gray-500 dark:text-slate-400 mt-0.5 mb-2">From the same app, copy API key and secret here.</p>
+                <div className="space-y-2">
+                  <input type="text" value={kiteSetupApiKey} onChange={(e) => setKiteSetupApiKey(e.target.value)} placeholder="API Key" className={`w-full rounded border px-3 py-2 text-sm ${darkMode ? 'border-slate-600 bg-slate-700 text-slate-100' : 'border-gray-300 bg-white text-gray-900'}`} />
+                  <input type="password" value={kiteSetupApiSecret} onChange={(e) => setKiteSetupApiSecret(e.target.value)} placeholder="API Secret" className={`w-full rounded border px-3 py-2 text-sm ${darkMode ? 'border-slate-600 bg-slate-700 text-slate-100' : 'border-gray-300 bg-white text-gray-900'}`} />
+                </div>
+              </div>
+            </div>
+
+            {kiteSetupError && <p className="text-sm text-red-600 dark:text-red-400 mb-3">{kiteSetupError}</p>}
+            <div className="flex gap-2 justify-end">
+              <button type="button" onClick={() => setKiteSetupOpen(false)} className="px-4 py-2 rounded border border-gray-300 dark:border-slate-600 text-sm font-medium">Cancel</button>
+              <button
+                type="button"
+                disabled={!kiteSetupApiKey.trim() || !kiteSetupApiSecret.trim() || kiteSetupSaving}
+                onClick={async () => {
+                  setKiteSetupError('');
+                  setKiteSetupSaving(true);
+                  try {
+                    const res = await fetch(`${API_URL}/api/kite/setup`, {
+                      method: 'POST',
+                      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${getToken()}` },
+                      body: JSON.stringify({ apiKey: kiteSetupApiKey.trim(), apiSecret: kiteSetupApiSecret.trim() }),
+                    });
+                    const json = await res.json().catch(() => ({}));
+                    if (!res.ok) throw new Error(json.error || 'Failed to save');
+                    setKiteSetupOpen(false);
+                    kiteRedirectDoneRef.current = true;
+                    setKiteAutoConnecting(true);
+                    fetch(`${API_URL}/api/kite/set-redirect-origin`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ origin: window.location.origin }) }).catch(() => {});
+                    window.location.href = `${API_URL}/api/kite/login?for=market`;
+                  } catch (e) {
+                    setKiteSetupError(e.message || 'Failed');
+                  } finally {
+                    setKiteSetupSaving(false);
+                  }
+                }}
+                className="px-4 py-2 rounded bg-blue-600 text-white text-sm font-medium disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                {kiteSetupSaving ? 'Saving…' : 'Save and connect'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
       {kiteAutoConnecting && (
         <div className="bg-sky-50 dark:bg-sky-900/20 border-b border-sky-200 dark:border-sky-800 px-3 sm:px-4 py-2 text-xs sm:text-sm text-sky-800 dark:text-sky-200">
           Enabling live data…
@@ -980,7 +1067,8 @@ export default function Dashboard({ user, onLogout, darkMode, onToggleDarkMode }
             <>Kite login failed. <a href={`${API_URL}/api/kite/login?for=market`} className="font-semibold underline hover:no-underline">Try again</a></>
           ) : (
             <>Enabling live data…</>
-          )}
+          )}{' '}
+          <button type="button" onClick={() => { setKiteSetupOpen(true); if (!kiteRedirectUrl) fetch(`${API_URL}/api/kite/setup`).then((r) => r.json()).then((d) => d.redirectUrlToAddInKite && setKiteRedirectUrl(d.redirectUrlToAddInKite)); }} className="font-semibold underline hover:no-underline">Setup Kite</button>
         </div>
       )}
       {error && !backendDown && (

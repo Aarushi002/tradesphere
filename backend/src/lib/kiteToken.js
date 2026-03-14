@@ -6,6 +6,30 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const TOKENS_FILE = path.join(__dirname, '..', '..', '.kite-tokens.json');
 const MARKET_TOKEN_FILE = path.join(__dirname, '..', '..', '.kite-token');
 
+// --- Kite API config: from DB (Setting) or env. Populated at startup and when setup/set-redirect-origin is called. ---
+let kiteApiKey = null;
+let kiteApiSecret = null;
+let kiteFrontendUrl = null;
+
+export function getKiteApiKey() {
+  return kiteApiKey || process.env.KITE_API_KEY || null;
+}
+
+export function getKiteApiSecret() {
+  return kiteApiSecret || process.env.KITE_API_SECRET || null;
+}
+
+export function getFrontendUrl() {
+  return kiteFrontendUrl || process.env.KITE_FRONTEND_URL || process.env.FRONTEND_URL || 'http://localhost:3000';
+}
+
+/** Set in-memory config (from DB or setup). Pass undefined to leave unchanged. */
+export function setKiteConfig(options = {}) {
+  if (options.apiKey !== undefined) kiteApiKey = options.apiKey || null;
+  if (options.apiSecret !== undefined) kiteApiSecret = options.apiSecret || null;
+  if (options.frontendUrl !== undefined) kiteFrontendUrl = options.frontendUrl || null;
+}
+
 // --- Global token for market data (quotes, charts, instruments). Set once by admin; all users get real data. ---
 let marketDataToken = null;
 

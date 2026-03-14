@@ -3,15 +3,13 @@ import express from 'express';
 import { KiteConnect } from 'kiteconnect';
 import { auth } from '../middleware/auth.js';
 import { optionalAuth } from '../middleware/auth.js';
-import { getAccessToken, setAccessToken, getMarketDataToken, setMarketDataToken } from '../src/lib/kiteToken.js';
+import { getAccessToken, setAccessToken, getMarketDataToken, setMarketDataToken, getKiteApiKey, getKiteApiSecret, getFrontendUrl, setKiteConfig } from '../src/lib/kiteToken.js';
 import Setting from '../models/Setting.js';
 
 const router = express.Router();
 
-const apiKey = process.env.KITE_API_KEY;
-const apiSecret = process.env.KITE_API_SECRET;
-
 function getKite(userId) {
+  const apiKey = getKiteApiKey();
   const accessToken = getAccessToken(userId);
   if (!apiKey || !accessToken) return null;
   const kc = new KiteConnect({ api_key: apiKey });
@@ -20,10 +18,11 @@ function getKite(userId) {
 }
 
 function requireKite(req, res, next) {
+  const apiKey = getKiteApiKey();
   if (!apiKey) {
     return res.status(503).json({
       error: 'Kite not configured',
-      message: 'Set KITE_API_KEY (and KITE_API_SECRET) in backend .env',
+      message: 'Add your Kite API key in app setup (or set KITE_API_KEY in backend .env)',
     });
   }
   if (!getAccessToken(req.userId)) {
@@ -38,10 +37,11 @@ function requireKite(req, res, next) {
 
 // GET /api/kite/login - No auth: state=market (app-level market data). ?for=market forces state=market so one login enables live data for everyone.
 router.get('/login', optionalAuth, (req, res) => {
+  const apiKey = getKiteApiKey();
   if (!apiKey) {
     return res.status(503).json({
-      error: 'Set KITE_API_KEY in backend .env',
-      hint: 'Local: ensure backend/.env exists and contains KITE_API_KEY=your_key. Production: set KITE_API_KEY in your host\'s environment variables (e.g. Vercel → Project → Settings → Environment Variables).',
+      error: 'Kite not configured',
+      hint: 'Use the in-app setup to add your Kite API key and secret (from developers.kite.trade), or set KITE_API_KEY in backend .env',
     });
   }
   const forMarket = (req.query.for || '').toString().toLowerCase() === 'market';
@@ -55,7 +55,9 @@ router.get('/login', optionalAuth, (req, res) => {
 router.get('/callback', async (req, res) => {
   const requestToken = (req.query.request_token || '').toString().trim();
   const stateRaw = (req.query.state || '').toString().trim();
-  const frontendUrl = process.env.KITE_FRONTEND_URL || process.env.FRONTEND_URL || 'http://localhost:3000';
+  const apiKey = getKiteApiKey();
+  const apiSecret = getKiteApiSecret();
+  const frontendUrl = getFrontendUrl();
 
   if (!apiKey || !apiSecret) {
     return res.redirect(`${frontendUrl}?kite_error=missing_api_secret`);
@@ -123,11 +125,63 @@ router.get('/callback', async (req, res) => {
 
 // GET /api/kite/status - Market data: no auth, returns whether app has Kite connected for real-time data
 router.get('/status', (req, res) => {
+  const apiKey = getKiteApiKey();
   const hasMarketData = !!getMarketDataToken();
+  const baseUrl = `${req.protocol}://${req.get('host') || req.hostname}`;
   res.json({
     configured: !!apiKey,
     hasSession: hasMarketData,
     loginUrl: apiKey ? `/api/kite/login` : null,
+    redirectUrlToAddInKite: `${baseUrl}/api/kite/callback`,
+  });
+});
+
+// POST /api/kite/set-redirect-origin - Auto-capture frontend URL (no auth). Call before redirecting user to Kite login.
+router.post('/set-redirect-origin', async (req, res) => {
+  const origin = (req.body?.origin || req.body?.frontendUrl || '').toString().trim();
+  if (!origin) return res.status(400).json({ error: 'Missing origin or frontendUrl' });
+  try {
+    await Setting.findOneAndUpdate(
+      { key: 'frontend_url' },
+      { key: 'frontend_url', value: origin },
+      { upsert: true }
+    );
+    setKiteConfig({ frontendUrl: origin });
+    res.json({ ok: true });
+  } catch (e) {
+    res.status(500).json({ error: e?.message || 'Failed to save' });
+  }
+});
+
+// POST /api/kite/setup - Save Kite API key/secret (auth required). Env vars not needed when using this.
+router.post('/setup', auth, async (req, res) => {
+  const apiKey = (req.body?.apiKey || req.body?.api_key || '').toString().trim();
+  const apiSecret = (req.body?.apiSecret || req.body?.api_secret || '').toString().trim();
+  if (!apiKey || !apiSecret) return res.status(400).json({ error: 'Missing apiKey and apiSecret' });
+  try {
+    await Setting.findOneAndUpdate(
+      { key: 'kite_api_key' },
+      { key: 'kite_api_key', value: apiKey },
+      { upsert: true }
+    );
+    await Setting.findOneAndUpdate(
+      { key: 'kite_api_secret' },
+      { key: 'kite_api_secret', value: apiSecret },
+      { upsert: true }
+    );
+    setKiteConfig({ apiKey, apiSecret });
+    res.json({ ok: true });
+  } catch (e) {
+    res.status(500).json({ error: e?.message || 'Failed to save' });
+  }
+});
+
+// GET /api/kite/setup - Return redirect URL to show in setup UI (auth optional)
+router.get('/setup', (req, res) => {
+  const baseUrl = `${req.protocol}://${req.get('host') || req.hostname}`;
+  res.json({
+    redirectUrlToAddInKite: `${baseUrl}/api/kite/callback`,
+    configured: !!getKiteApiKey(),
   });
 });
 

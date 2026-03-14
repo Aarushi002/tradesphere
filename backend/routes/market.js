@@ -1,13 +1,33 @@
 import express from 'express';
 import { KiteConnect } from 'kiteconnect';
-import { getMarketDataToken } from '../src/lib/kiteToken.js';
+import YahooFinance from 'yahoo-finance2';
+import { getMarketDataToken, getKiteApiKey } from '../src/lib/kiteToken.js';
 
 const router = express.Router();
+const yahooFinance = new YahooFinance();
 
-const apiKey = process.env.KITE_API_KEY;
+// Map our symbol (or Kite key) to Yahoo Finance symbol for fallback when Kite is not connected.
+function toYahooSymbol(symbolOrKey) {
+  const s = (symbolOrKey || '').toString().trim();
+  if (!s) return null;
+  const upper = s.toUpperCase().replace(/\s+/g, '');
+  if (upper === 'NIFTY50' || upper === 'NIFTY 50') return '^NSEI';
+  if (upper === 'NIFTYBANK' || upper === 'NIFTY BANK') return '^NSEBANK';
+  if (upper === 'SENSEX') return '^BSESN';
+  if (s.includes(':')) {
+    const [, sym] = s.split(':');
+    const symUpper = (sym || '').toUpperCase().replace(/\s+/g, '');
+    if (symUpper === 'NIFTY50' || symUpper === 'NIFTY 50') return '^NSEI';
+    if (symUpper === 'NIFTYBANK' || symUpper === 'NIFTY BANK') return '^NSEBANK';
+    if (symUpper === 'SENSEX') return '^BSESN';
+    return (sym || '').replace(/\s+/g, '') + '.NS';
+  }
+  return s.replace(/\s+/g, '') + '.NS';
+}
 
 /** Single Kite client for market data. All users share real-time prices (paper trading app). */
 function getKiteForMarket() {
+  const apiKey = getKiteApiKey();
   const accessToken = getMarketDataToken();
   if (!apiKey || !accessToken) return null;
   const kc = new KiteConnect({ api_key: apiKey });
@@ -82,7 +102,7 @@ async function loadInstruments() {
   if (Date.now() - instrumentsCacheTime < INSTRUMENTS_CACHE_TTL_MS && instrumentsCache.length > 0) {
     return instrumentsCache;
   }
-  if (!apiKey || !getMarketDataToken()) return instrumentsCache.length > 0 ? instrumentsCache : [];
+  if (!getKiteApiKey() || !getMarketDataToken()) return instrumentsCache.length > 0 ? instrumentsCache : [];
   try {
     const kc = getKiteForMarket();
     const [nse, nfo, bse, mcx, mf] = await Promise.all([
@@ -252,16 +272,9 @@ router.get('/instruments/search', async (req, res) => {
 });
 
 // GET /api/market/quotes?symbols=NIFTY 50,SENSEX,RELIANCE,TCS,...
-// Real-time LTP and day change. Uses app-level Kite connection (paper trading: one data source for all users).
+// Real-time LTP and day change. Uses Kite when connected; falls back to Yahoo Finance so live data works without Kite.
 router.get('/quotes', async (req, res) => {
   try {
-    if (!apiKey || !getMarketDataToken()) {
-      return res.status(503).json({
-        error: 'Market data unavailable',
-        message: 'Administrator: set KITE_ACCESS_TOKEN or connect Kite once for market data.',
-        code: 'KITE_SESSION_EXPIRED',
-      });
-    }
     const raw = req.query.symbols;
     const symbols = raw
       ? raw.split(',').map((s) => s.trim()).filter(Boolean)
@@ -282,26 +295,47 @@ router.get('/quotes', async (req, res) => {
     if (keys.length === 0) {
       return res.json({ data: [] });
     }
-    const kc = getKiteForMarket();
-    const response = await kc.getQuote(keys);
-    const data = [];
-    // Kite library returns the inner "data" object directly (not { data: {...} })
-    const responseData = response && typeof response === 'object' && !Array.isArray(response) ? response : {};
-    const responseKeys = Object.keys(responseData);
-    if (responseKeys.length > 0) {
-      console.log('[quotes] Kite returned keys:', responseKeys.join(', '));
-    }
-    for (const [kiteKey, q] of Object.entries(responseData)) {
+
+    const hasKite = getKiteApiKey() && getMarketDataToken();
+    if (hasKite) {
+      const kc = getKiteForMarket();
+      const response = await kc.getQuote(keys);
+      const data = [];
+      const responseData = response && typeof response === 'object' && !Array.isArray(response) ? response : {};
+      for (const [kiteKey, q] of Object.entries(responseData)) {
         const name = keyToName[kiteKey] || normalizeKiteKeyToName(kiteKey);
         const lastPrice = Number(q.last_price);
         if (lastPrice === undefined || lastPrice === null || Number.isNaN(lastPrice)) continue;
         const ohlc = q.ohlc || {};
         const prevClose = Number(ohlc.close);
         let netChange = Number(q.net_change);
-        if (!Number.isFinite(netChange) && Number.isFinite(prevClose)) {
-          netChange = lastPrice - prevClose;
-        }
+        if (!Number.isFinite(netChange) && Number.isFinite(prevClose)) netChange = lastPrice - prevClose;
         const changePercent = prevClose && prevClose !== 0 ? (netChange / prevClose) * 100 : 0;
+        data.push({
+          name,
+          value: lastPrice,
+          change: Math.round(netChange * 100) / 100,
+          changePercent: Math.round(changePercent * 100) / 100,
+        });
+      }
+      return res.json({ data });
+    }
+
+    // Fallback: Yahoo Finance so dashboard shows real data without Kite
+    const yahooSymbols = keys.map((k) => toYahooSymbol(k)).filter(Boolean);
+    if (yahooSymbols.length === 0) return res.json({ data: [] });
+    const quotes = await yahooFinance.quote(yahooSymbols).catch(() => []);
+    const quoteList = Array.isArray(quotes) ? quotes : Object.values(quotes || {});
+    const data = [];
+    for (let i = 0; i < keys.length; i++) {
+      const key = keys[i];
+      const name = keyToName[key] || normalizeKiteKeyToName(key);
+      const q = quoteList[i] || quoteList.find((r) => r && toYahooSymbol(key) === r.symbol);
+      if (!q || q.regularMarketPrice == null) continue;
+      const lastPrice = Number(q.regularMarketPrice);
+      const prevClose = Number(q.regularMarketPreviousClose ?? q.previousClose ?? lastPrice);
+      const netChange = Number.isFinite(prevClose) ? lastPrice - prevClose : 0;
+      const changePercent = prevClose && prevClose !== 0 ? (netChange / prevClose) * 100 : 0;
       data.push({
         name,
         value: lastPrice,
@@ -309,9 +343,7 @@ router.get('/quotes', async (req, res) => {
         changePercent: Math.round(changePercent * 100) / 100,
       });
     }
-    if (data.length > 0) {
-      console.log('[quotes] Returned', data.length, 'instruments:', data.map((d) => d.name).join(', '));
-    }
+    if (data.length > 0) console.log('[quotes] Yahoo fallback returned', data.length, 'instruments');
     res.json({ data });
   } catch (err) {
     console.error('Error fetching quotes', err?.message || err);
@@ -407,7 +439,7 @@ router.get('/option-chain', async (req, res) => {
     if (!rawSymbol) {
       return res.status(400).json({ error: 'symbol is required (e.g. NIFTY50, NIFTY BANK)' });
     }
-    if (!apiKey || !getMarketDataToken()) {
+    if (!getKiteApiKey() || !getMarketDataToken()) {
       return res.status(503).json({
         error: 'Market data unavailable',
         message: 'Administrator: configure Kite for market data.',
@@ -516,46 +548,59 @@ router.get('/option-chain', async (req, res) => {
 });
 
 // GET /api/market/candles?symbol=RELIANCE&range=6d  (range: 1d, 6d, 14d, 52w, ytd, 1m, 3m)
+// Uses Kite when connected; falls back to Yahoo Finance for real chart data without Kite.
 router.get('/candles', async (req, res) => {
   try {
     const { symbol: rawSymbol = 'NIFTY50', range = '6d' } = req.query;
     const symbol = rawSymbol.toString().trim() || 'NIFTY50';
-
-    const token = await getInstrumentToken(symbol);
-    if (!token) {
-      return res.status(400).json({ error: 'Unsupported symbol. Add to watchlist or use NSE:SYMBOL.' });
-    }
-
     const { from, to, interval } = getRangeParams(range);
 
-    if (!apiKey || !getMarketDataToken()) {
-      return res.status(503).json({
-        error: 'Market data unavailable',
-        message: 'Administrator: configure Kite for market data.',
-      });
+    const hasKite = getKiteApiKey() && getMarketDataToken();
+    if (hasKite) {
+      const token = await getInstrumentToken(symbol);
+      if (!token) {
+        return res.status(400).json({ error: 'Unsupported symbol. Add to watchlist or use NSE:SYMBOL.' });
+      }
+      const kc = getKiteForMarket();
+      const fromStr = formatKiteDateTime(from);
+      const toStr = formatKiteDateTime(to);
+      const candles = await kc.getHistoricalData(token, interval, fromStr, toStr, false, false);
+      const data = (Array.isArray(candles) ? candles : []).map((c) => ({
+        time: new Date(c.date).getTime() / 1000,
+        open: Number(c.open),
+        high: Number(c.high),
+        low: Number(c.low),
+        close: Number(c.close),
+        volume: c.volume != null ? Number(c.volume) : undefined,
+      }));
+      return res.json({ symbol, interval, range, data });
     }
 
-    const kc = getKiteForMarket();
-    const fromStr = formatKiteDateTime(from);
-    const toStr = formatKiteDateTime(to);
-    const candles = await kc.getHistoricalData(
-      token,
-      interval,
-      fromStr,
-      toStr,
-      false,
-      false
-    );
-
-    const data = (Array.isArray(candles) ? candles : []).map((c) => ({
-      time: new Date(c.date).getTime() / 1000,
-      open: Number(c.open),
-      high: Number(c.high),
-      low: Number(c.low),
-      close: Number(c.close),
-      volume: c.volume != null ? Number(c.volume) : undefined,
-    }));
-
+    // Fallback: Yahoo Finance for real chart data without Kite
+    const yahooSymbol = toYahooSymbol(symbol.includes(':') ? symbol : toKiteInstrumentKey(symbol) || symbol);
+    if (!yahooSymbol) {
+      return res.status(400).json({ error: 'Unsupported symbol for chart.' });
+    }
+    const period1 = from;
+    const period2 = to;
+    const yahooInterval = interval === '15minute' ? '15m' : interval === '60minute' ? '1h' : '1d';
+    const result = await yahooFinance.chart(yahooSymbol, {
+      period1,
+      period2,
+      interval: yahooInterval,
+    }).catch(() => null);
+    const quotes = result && result.quotes ? result.quotes : [];
+    const data = quotes
+      .filter((c) => c.open != null && c.close != null)
+      .map((c) => ({
+        time: c.date instanceof Date ? Math.floor(c.date.getTime() / 1000) : (typeof c.date === 'number' ? Math.floor(c.date / 1000) : 0),
+        open: Number(c.open),
+        high: Number(c.high ?? c.open),
+        low: Number(c.low ?? c.open),
+        close: Number(c.close),
+        volume: c.volume != null ? Number(c.volume) : undefined,
+      }));
+    if (data.length > 0) console.log('[candles] Yahoo fallback returned', data.length, 'candles for', yahooSymbol);
     res.json({ symbol, interval, range, data });
   } catch (err) {
     console.error('Error fetching candles', err?.message || err);
@@ -573,7 +618,7 @@ router.get('/market-depth', async (req, res) => {
     if (!raw) {
       return res.status(400).json({ error: 'symbol is required (e.g. RELIANCE or NSE:RELIANCE)' });
     }
-    if (!apiKey || !getMarketDataToken()) {
+    if (!getKiteApiKey() || !getMarketDataToken()) {
       return res.status(503).json({
         error: 'Market data unavailable',
         message: 'Administrator: configure Kite for market data.',
