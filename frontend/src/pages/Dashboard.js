@@ -34,8 +34,6 @@ function CommentForm({ postId, onAdd }) {
   );
 }
 
-const BOTTOM_TABS = ['Orders', 'Positions', 'Holdings', 'P&L'];
-
 const WATCHLIST_KEY = 'tradesphere_watchlist';
 
 // Deterministic mock candles per symbol so each stock has different chart
@@ -114,7 +112,9 @@ export default function Dashboard({ user, onLogout, darkMode, onToggleDarkMode }
   const [error, setError] = useState('');
   const [symbol, setSymbol] = useState('RELIANCE');
   const [quantity, setQuantity] = useState('10');
+  // eslint-disable-next-line no-unused-vars -- kept for future trade/tab UI
   const [tradeLoading, setTradeLoading] = useState(false);
+  // eslint-disable-next-line no-unused-vars -- kept for future tab UI
   const [bottomTab, setBottomTab] = useState('Holdings');
   const [searchQuery, setSearchQuery] = useState('');
   const [candles, setCandles] = useState([]);
@@ -369,6 +369,7 @@ export default function Dashboard({ user, onLogout, darkMode, onToggleDarkMode }
     }
   }
 
+  // eslint-disable-next-line no-unused-vars -- used when adding back legacy buy/sell
   function refreshPortfolio() {
     setLoading(true);
     const token = getToken();
@@ -378,48 +379,6 @@ export default function Dashboard({ user, onLogout, darkMode, onToggleDarkMode }
     fetch(`${API_URL}/api/trades`, { headers: { Authorization: `Bearer ${token}` } })
       .then((res) => res.json())
       .then(setTrades);
-  }
-
-  async function handleBuy(e) {
-    e.preventDefault();
-    setTradeLoading(true);
-    setError('');
-    try {
-      const res = await fetch(`${API_URL}/api/trades/buy`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${getToken()}` },
-        body: JSON.stringify({ symbol: symbol.toUpperCase(), quantity: Number(quantity) }),
-      });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error || 'Buy failed');
-      setQuantity('10');
-      refreshPortfolio();
-    } catch (err) {
-      setError(err.message);
-    } finally {
-      setTradeLoading(false);
-    }
-  }
-
-  async function handleSell(e) {
-    e.preventDefault();
-    setTradeLoading(true);
-    setError('');
-    try {
-      const res = await fetch(`${API_URL}/api/trades/sell`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${getToken()}` },
-        body: JSON.stringify({ symbol: symbol.toUpperCase(), quantity: Number(quantity) }),
-      });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error || 'Sell failed');
-      setQuantity('10');
-      refreshPortfolio();
-    } catch (err) {
-      setError(err.message);
-    } finally {
-      setTradeLoading(false);
-    }
   }
 
   function isOptionSymbol(trSymbol) {
@@ -578,7 +537,6 @@ export default function Dashboard({ user, onLogout, darkMode, onToggleDarkMode }
                     className={`flex flex-col gap-0.5 px-2 py-1.5 cursor-pointer text-left border-b last:border-b-0 ${darkMode ? 'border-slate-700 hover:bg-slate-700' : 'border-gray-100 hover:bg-gray-100'}`}
                     onClick={() => {
                       const key = inst.key || `${inst.exchange}:${inst.tradingsymbol}`;
-                      const sym = inst.tradingsymbol;
                       setWatchlist((prev) => (prev.includes(key) ? prev : [...prev, key]));
                       saveWatchlist(watchlist.includes(key) ? watchlist : [...watchlist, key]);
                       setSearchQuery('');
