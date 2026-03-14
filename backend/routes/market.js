@@ -93,6 +93,10 @@ const FALLBACK_INSTRUMENTS = [
   { exchange: 'NFO', tradingsymbol: 'NIFTY24MARFUT', name: 'Nifty 50 Futures', instrument_type: 'FUT', segment: 'NFO' },
   { exchange: 'NFO', tradingsymbol: 'BANKNIFTY24MARFUT', name: 'Bank Nifty Futures', instrument_type: 'FUT', segment: 'NFO' },
   { exchange: 'NFO', tradingsymbol: 'FINNIFTY24MARFUT', name: 'Nifty Financial Services Futures', instrument_type: 'FUT', segment: 'NFO' },
+  { exchange: 'NSE', tradingsymbol: 'NIFTY BANK', name: 'Nifty Bank Index', instrument_type: 'INDEX', segment: 'NSE' },
+  { exchange: 'MCX', tradingsymbol: 'GOLDM24NOV', name: 'Gold Mini', instrument_type: 'FUT', segment: 'MCX' },
+  { exchange: 'MCX', tradingsymbol: 'SILVERM24DEC', name: 'Silver Mini', instrument_type: 'FUT', segment: 'MCX' },
+  { exchange: 'MCX', tradingsymbol: 'CRUDEOILM24NOV', name: 'Crude Oil Mini', instrument_type: 'FUT', segment: 'MCX' },
 ];
 
 async function loadInstruments() {
@@ -102,10 +106,11 @@ async function loadInstruments() {
   if (!apiKey || !accessToken) return FALLBACK_INSTRUMENTS;
   try {
     const kc = getKite();
-    const [nse, nfo, bse, mf] = await Promise.all([
+    const [nse, nfo, bse, mcx, mf] = await Promise.all([
       kc.getInstruments('NSE').then(ensureInstrumentArray).catch(() => []),
       kc.getInstruments('NFO').then(ensureInstrumentArray).catch(() => []),
       kc.getInstruments('BSE').then(ensureInstrumentArray).catch(() => []),
+      kc.getInstruments('MCX').then(ensureInstrumentArray).catch(() => []),
       (typeof kc.getMFInstruments === 'function' ? kc.getMFInstruments() : Promise.resolve([]))
         .then((d) => {
           const arr = ensureInstrumentArray(d);
@@ -120,13 +125,13 @@ async function loadInstruments() {
         })
         .catch(() => []),
     ]);
-    const list = [].concat(nse, nfo, bse, mf);
+    const list = [].concat(nse, nfo, bse, mcx, mf);
     if (list.length > 0) {
       instrumentsCache = list;
       instrumentsCacheTime = Date.now();
-      const nfoCount = nfo.length;
-      const mfCount = mf.length;
-      console.log('[instruments] Loaded', list.length, 'from Kite (NSE+BSE+NFO+MF). NFO:', nfoCount, 'MF:', mfCount);
+      const nseEq = nse.filter((i) => (i.instrument_type || '') === 'EQ').length;
+      const nseIdx = nse.filter((i) => (i.instrument_type || '') === 'INDEX').length;
+      console.log('[instruments] Loaded', list.length, 'from Kite. NSE:', nse.length, '(EQ:', nseEq, 'INDEX:', nseIdx, ') BSE:', bse.length, 'NFO:', nfo.length, 'MCX:', mcx.length, 'MF:', mf.length);
       return list;
     }
   } catch (e) {
@@ -190,6 +195,17 @@ router.get('/instruments/search', async (req, res) => {
       return sym.includes(words[0]) || name.includes(words[0]);
     });
     filtered.sort((a, b) => scoreInstrument(b, words, fullQuery) - scoreInstrument(a, words, fullQuery));
+    const segmentLabel = (inst) => {
+      const ex = (inst.exchange || '').toUpperCase();
+      const type = (inst.instrument_type || '').toUpperCase();
+      if (type === 'INDEX') return 'Index';
+      if (ex === 'NSE' && (type === 'EQ' || !type)) return 'NSE Equity';
+      if (ex === 'BSE' && (type === 'EQ' || !type)) return 'BSE Equity';
+      if (ex === 'NFO') return type === 'FUT' ? 'NFO Futures' : type === 'CE' || type === 'PE' ? 'NFO Options' : 'NFO';
+      if (ex === 'MCX') return 'MCX Commodity';
+      if (ex === 'MF') return 'Mutual Fund';
+      return ex || 'Market';
+    };
     const slice = filtered.slice(0, limit).map((inst) => ({
       exchange: inst.exchange,
       tradingsymbol: inst.tradingsymbol,
@@ -198,6 +214,7 @@ router.get('/instruments/search', async (req, res) => {
       segment: inst.segment,
       instrument_token: inst.instrument_token,
       key: `${inst.exchange}:${inst.tradingsymbol}`,
+      segment_label: segmentLabel(inst),
     }));
     res.json({ suggestions: slice });
   } catch (err) {

@@ -287,7 +287,7 @@ export default function Dashboard({ user, onLogout, darkMode, onToggleDarkMode }
       return;
     }
     const t = setTimeout(() => {
-      fetch(`${API_URL}/api/market/instruments/search?q=${encodeURIComponent(q)}&limit=500`)
+      fetch(`${API_URL}/api/market/instruments/search?q=${encodeURIComponent(q)}&limit=1000`)
         .then((res) => res.ok ? res.json() : Promise.reject())
         .then((json) => {
           setSearchSuggestions(json.suggestions || []);
@@ -732,7 +732,7 @@ export default function Dashboard({ user, onLogout, darkMode, onToggleDarkMode }
               <span className={`shrink-0 text-gray-400 ${darkMode ? 'text-slate-500' : ''}`} aria-hidden>🔍</span>
               <input
                 type="text"
-                placeholder="Search eg: infy bse, nifty fut, index fund, et"
+                placeholder="Search: NSE/BSE stocks, indices, NFO F&O, MCX commodity"
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
                 onFocus={() => searchSuggestions.length > 0 && setSearchSuggestionsOpen(true)}
@@ -796,8 +796,8 @@ export default function Dashboard({ user, onLogout, darkMode, onToggleDarkMode }
                   >
                     <span className="font-medium text-sm">{inst.tradingsymbol}</span>
                     <span className={`text-xs ${darkMode ? 'text-slate-400' : 'text-gray-500'}`}>
-                      {inst.name || inst.tradingsymbol} · {inst.exchange}
-                      {inst.instrument_type ? ` · ${(inst.instrument_type === 'FUT' ? 'Future' : inst.instrument_type === 'CE' || inst.instrument_type === 'PE' ? 'Option' : inst.instrument_type === 'INDEX' ? 'Index' : inst.instrument_type === 'MF' ? 'MF' : inst.instrument_type)}` : ''}
+                      {inst.name || inst.tradingsymbol}
+                      {inst.segment_label ? ` · ${inst.segment_label}` : ` · ${inst.exchange}${inst.instrument_type ? ` · ${(inst.instrument_type === 'FUT' ? 'Future' : inst.instrument_type === 'CE' || inst.instrument_type === 'PE' ? 'Option' : inst.instrument_type === 'INDEX' ? 'Index' : inst.instrument_type === 'MF' ? 'MF' : inst.instrument_type)}` : ''}`}
                     </span>
                   </li>
                 ))}
