@@ -35,6 +35,41 @@ function CommentForm({ postId, onAdd }) {
 }
 
 const WATCHLIST_KEY = 'tradesphere_watchlist';
+const WATCHLIST_GROUPS_KEY = 'tradesphere_watchlist_groups';
+
+function getDefaultGroupsState() {
+  try {
+    const raw = localStorage.getItem(WATCHLIST_KEY);
+    const list = raw ? JSON.parse(raw) : null;
+    const symbols = Array.isArray(list) && list.length > 0 ? list : DEFAULT_WATCHLIST;
+    return {
+      groups: [{ id: 'default', name: 'Default', symbols }],
+      activeId: 'default',
+    };
+  } catch (_) {}
+  return { groups: [{ id: 'default', name: 'Default', symbols: DEFAULT_WATCHLIST }], activeId: 'default' };
+}
+
+function loadWatchlistGroups() {
+  try {
+    const raw = localStorage.getItem(WATCHLIST_GROUPS_KEY);
+    if (raw) {
+      const data = JSON.parse(raw);
+      if (data?.groups?.length > 0) return data;
+    }
+  } catch (_) {}
+  const state = getDefaultGroupsState();
+  try {
+    localStorage.setItem(WATCHLIST_GROUPS_KEY, JSON.stringify(state));
+  } catch (_) {}
+  return state;
+}
+
+function saveWatchlistGroups(state) {
+  try {
+    localStorage.setItem(WATCHLIST_GROUPS_KEY, JSON.stringify(state));
+  } catch (_) {}
+}
 
 // Deterministic mock candles per symbol so each stock has different chart
 function generateMockCandles(symbol, nowUnix) {
@@ -84,23 +119,6 @@ function getMockQuote(symbol) {
   return { lastPrice: Math.round(lastPrice * 100) / 100, change: Math.round(change * 100) / 100, changePercent: Math.round(changePercent * 100) / 100 };
 }
 
-function loadWatchlist() {
-  try {
-    const raw = localStorage.getItem(WATCHLIST_KEY);
-    if (raw) {
-      const list = JSON.parse(raw);
-      return Array.isArray(list) && list.length > 0 ? list : DEFAULT_WATCHLIST;
-    }
-  } catch (_) {}
-  return DEFAULT_WATCHLIST;
-}
-
-function saveWatchlist(list) {
-  try {
-    localStorage.setItem(WATCHLIST_KEY, JSON.stringify(list));
-  } catch (_) {}
-}
-
 export default function Dashboard({ user, onLogout, darkMode, onToggleDarkMode }) {
   const [portfolio, setPortfolio] = useState(null);
   const [trades, setTrades] = useState([]);
@@ -120,7 +138,41 @@ export default function Dashboard({ user, onLogout, darkMode, onToggleDarkMode }
   const [candles, setCandles] = useState([]);
   const [chartRange, setChartRange] = useState('6d'); // 1d, 6d, 14d, 52w, ytd, 1m, 3m
   const [chartLoading, setChartLoading] = useState(false);
-  const [watchlist, setWatchlist] = useState(() => loadWatchlist());
+  const [watchlistGroups, setWatchlistGroups] = useState(loadWatchlistGroups);
+  const activeGroup = watchlistGroups.groups.find((g) => g.id === watchlistGroups.activeId) || watchlistGroups.groups[0];
+  const watchlist = activeGroup ? activeGroup.symbols : [];
+  function setWatchlist(updater) {
+    const nextList = typeof updater === 'function' ? updater(watchlist) : updater;
+    setWatchlistGroups((prev) => {
+      const next = {
+        ...prev,
+        groups: prev.groups.map((g) =>
+          g.id === prev.activeId ? { ...g, symbols: nextList } : g
+        ),
+      };
+      saveWatchlistGroups(next);
+      return next;
+    });
+  }
+  function addWatchlistGroup() {
+    const n = watchlistGroups.groups.length + 1;
+    const id = `wl-${Date.now()}-${n}`;
+    setWatchlistGroups((prev) => {
+      const next = {
+        groups: [...prev.groups, { id, name: `Watchlist ${n}`, symbols: [] }],
+        activeId: id,
+      };
+      saveWatchlistGroups(next);
+      return next;
+    });
+  }
+  function switchWatchlistGroup(id) {
+    setWatchlistGroups((prev) => {
+      const next = { ...prev, activeId: id };
+      saveWatchlistGroups(next);
+      return next;
+    });
+  }
   const [chartError, setChartError] = useState('');
   const [backendDown, setBackendDown] = useState(false);
   const [mainNav, setMainNav] = useState('dashboard');
@@ -136,6 +188,48 @@ export default function Dashboard({ user, onLogout, darkMode, onToggleDarkMode }
   const [kiteMargins, setKiteMargins] = useState(null);
   const [mfHoldings, setMfHoldings] = useState([]);
   const [mfOrders, setMfOrders] = useState([]);
+  const [tradingMode, setTradingMode] = useState(() => localStorage.getItem('tradesphere_trading_mode') || 'paper'); // 'paper' | 'live'
+  useEffect(() => {
+    localStorage.setItem('tradesphere_trading_mode', tradingMode);
+  }, [tradingMode]);
+  const [showRiskDisclosure, setShowRiskDisclosure] = useState(() => !sessionStorage.getItem('tradesphere_risk_ack'));
+  const [watchlistOptionsOpen, setWatchlistOptionsOpen] = useState(null); // symbol key or null
+  const [optionChainSymbol, setOptionChainSymbol] = useState(null);
+  const [optionChainData, setOptionChainData] = useState(null);
+  const [optionChainLoading, setOptionChainLoading] = useState(false);
+  const [optionChainExpiry, setOptionChainExpiry] = useState(null); // YYYY-MM-DD or null for server default
+  const [marketDepthSymbol, setMarketDepthSymbol] = useState(null);
+  const [watchlistChangeType, setWatchlistChangeType] = useState('close'); // 'close' | 'open'
+  const [watchlistShow, setWatchlistShow] = useState({ priceChange: true, priceChangePct: true, priceDirection: true, holdings: false, notes: false, groupColors: false });
+  const [watchlistSortBy, setWatchlistSortBy] = useState('LTP'); // '%' | 'LTP' | 'A-Z' | 'EXCH'
+  const [watchlistFilterOpen, setWatchlistFilterOpen] = useState(false);
+  function isMarketHours() {
+    const now = new Date();
+    const ist = new Date(now.toLocaleString('en-US', { timeZone: 'Asia/Kolkata' }));
+    const day = ist.getDay();
+    const hours = ist.getHours() + ist.getMinutes() / 60;
+    if (day === 0 || day === 6) return false;
+    return hours >= 9 && hours < 15.5;
+  }
+  const marketLive = isMarketHours();
+
+  useEffect(() => {
+    if (!optionChainSymbol) {
+      setOptionChainData(null);
+      return;
+    }
+    const symbol = optionChainSymbol.includes(':') ? optionChainSymbol.split(':')[1] : optionChainSymbol;
+    setOptionChainLoading(true);
+    setOptionChainData(null);
+    // optionChainExpiry is set by user when they click an expiry tab; otherwise server picks default
+    const qs = new URLSearchParams({ symbol });
+    if (optionChainExpiry) qs.set('expiry', optionChainExpiry);
+    fetch(`${API_URL}/api/market/option-chain?${qs}`)
+      .then((res) => res.json())
+      .then((data) => setOptionChainData(data))
+      .catch((err) => setOptionChainData({ error: err.message, chain: [], expiries: [] }))
+      .finally(() => setOptionChainLoading(false));
+  }, [optionChainSymbol, optionChainExpiry]);
 
   function fetchPortfolio() {
     const token = getToken();
@@ -239,14 +333,16 @@ export default function Dashboard({ user, onLogout, darkMode, onToggleDarkMode }
       .catch(() => {
         setIndices([]);
       });
+    const intervalMs = marketLive ? 5000 : 15000;
     const interval = setInterval(() => {
       fetch(`${API_URL}/api/market/quotes?symbols=${qs}`)
         .then((res) => res.ok ? res.json() : Promise.reject())
         .then(updateQuotesFromResponse)
         .catch(() => {});
-    }, 15000);
+    }, intervalMs);
     return () => clearInterval(interval);
-  }, [watchlist]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- refetch when watchlist symbols or market hours change
+  }, [watchlist.length, watchlist.join(','), marketLive]);
 
   useEffect(() => {
     const token = getToken();
@@ -267,18 +363,12 @@ export default function Dashboard({ user, onLogout, darkMode, onToggleDarkMode }
   function addToWatchlist(s) {
     const sym = (s || searchQuery).toString().trim().toUpperCase();
     if (!sym) return;
-    setWatchlist((prev) => {
-      if (prev.includes(sym)) return prev;
-      const next = [...prev, sym];
-      saveWatchlist(next);
-      return next;
-    });
+    setWatchlist((prev) => (prev.includes(sym) ? prev : [...prev, sym]));
     setSearchQuery('');
   }
 
   function removeFromWatchlist(s) {
     const next = watchlist.filter((x) => x !== s);
-    saveWatchlist(next);
     setWatchlist(next);
     if (symbol === s) setSymbol(next[0] || '');
   }
@@ -386,8 +476,36 @@ export default function Dashboard({ user, onLogout, darkMode, onToggleDarkMode }
     return /CE$/.test(s) || /PE$/.test(s);
   }
 
-  async function placeKiteOrder(transactionType) {
+  async function placeOrder(transactionType) {
     const [ex, trSymbol] = symbol.includes(':') ? symbol.split(':') : ['NSE', symbol];
+    const qty = Number(quantity) || 1;
+    setKiteOrderLoading(true);
+    setError('');
+
+    if (tradingMode === 'paper') {
+      try {
+        const endpoint = transactionType === 'BUY' ? `${API_URL}/api/trades/buy` : `${API_URL}/api/trades/sell`;
+        const res = await fetch(endpoint, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${getToken()}` },
+          body: JSON.stringify({ symbol: trSymbol, quantity: qty }),
+        });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.error || 'Order failed');
+        setQuantity('10');
+        fetchPortfolio();
+        fetch(`${API_URL}/api/trades`, { headers: { Authorization: `Bearer ${getToken()}` } })
+          .then((r) => r.ok && r.json())
+          .then(setTrades)
+          .catch(() => {});
+      } catch (err) {
+        setError(err.message);
+      } finally {
+        setKiteOrderLoading(false);
+      }
+      return;
+    }
+
     const isNfo = ex === 'NFO';
     const isOpt = isOptionSymbol(trSymbol);
     const useLimit = isNfo && isOpt ? true : orderType === 'LIMIT';
@@ -395,13 +513,11 @@ export default function Dashboard({ user, onLogout, darkMode, onToggleDarkMode }
       exchange: ex,
       tradingsymbol: trSymbol,
       transaction_type: transactionType,
-      quantity: Number(quantity) || 1,
+      quantity: qty,
       order_type: useLimit ? 'LIMIT' : 'MARKET',
       product: isNfo ? (orderProduct === 'CNC' ? 'NRML' : orderProduct) : orderProduct,
     };
     if (useLimit && orderPrice) payload.price = Number(orderPrice);
-    setKiteOrderLoading(true);
-    setError('');
     try {
       const res = await fetch(`${API_URL}/api/kite/order`, {
         method: 'POST',
@@ -440,8 +556,47 @@ export default function Dashboard({ user, onLogout, darkMode, onToggleDarkMode }
     { id: 'funds', label: 'Funds' },
   ];
 
+  const getQuoteKeyForSort = (sym) => {
+    const part = sym.includes(':') ? sym.split(':')[1] : sym;
+    if (part === 'NIFTYBANK') return 'NIFTY BANK';
+    if (part === 'NIFTY50') return 'NIFTY 50';
+    return part || sym;
+  };
+  const sortedWatchlist = [...watchlist].sort((a, b) => {
+    const nameA = (a.includes(':') ? a.split(':')[1] : a).toLowerCase();
+    const nameB = (b.includes(':') ? b.split(':')[1] : b).toLowerCase();
+    const qA = quotes[getQuoteKeyForSort(a)] || {};
+    const qB = quotes[getQuoteKeyForSort(b)] || {};
+    if (watchlistSortBy === 'A-Z') return nameA.localeCompare(nameB);
+    if (watchlistSortBy === 'EXCH') return (a.split(':')[0] || '').localeCompare(b.split(':')[0] || '');
+    if (watchlistSortBy === '%') return (qB.changePercent ?? 0) - (qA.changePercent ?? 0);
+    return (qB.lastPrice ?? 0) - (qA.lastPrice ?? 0);
+  });
+
   return (
     <div className={`flex h-screen flex-col ${darkMode ? 'bg-slate-900 text-slate-100' : 'bg-white text-gray-900'}`}>
+      {/* Risk Disclosure Popup - show once per session after login */}
+      {showRiskDisclosure && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
+          <div className={`max-w-lg w-full rounded-lg shadow-xl p-6 ${darkMode ? 'bg-slate-800 border border-slate-600' : 'bg-white border border-gray-200'}`}>
+            <div className="flex items-center gap-2 mb-4">
+              <span className="text-2xl">📄</span>
+              <h2 className="text-lg font-semibold">Risk disclosures on derivatives</h2>
+            </div>
+            <ul className="list-disc list-inside text-sm space-y-2 mb-4 text-gray-700 dark:text-slate-300">
+              <li>9 out of 10 individual traders in equity Futures and Options Segment, incurred net losses.</li>
+              <li>On an average, loss makers registered net trading loss close to ₹50,000.</li>
+              <li>Over and above the net trading losses incurred, loss makers expended an additional 28% of net trading losses as transaction costs.</li>
+              <li>Those making net trading profits, incurred between 15% to 50% of such profits as transaction cost.</li>
+            </ul>
+            <p className="text-xs text-gray-500 dark:text-slate-400 mb-4">Source: SEBI study dated January 25, 2023 on &quot;Analysis of Profit and Loss of Individual Traders dealing in equity Futures and Options (F&O) Segment&quot;, wherein Aggregate Level findings are based on annual Profit/Loss incurred by individual traders in equity F&O during FY 2021-22.</p>
+            <div className="flex justify-end">
+              <button type="button" onClick={() => { sessionStorage.setItem('tradesphere_risk_ack', '1'); setShowRiskDisclosure(false); }} className="px-4 py-2 bg-blue-600 text-white rounded font-medium hover:bg-blue-700">I understand</button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Top Bar - Zerodha style: indices left, nav + user right */}
       <header className={`flex items-center justify-between border-b px-4 py-2 ${darkMode ? 'border-slate-700 bg-slate-800' : 'border-gray-200 bg-white'}`}>
         <div className="flex items-center gap-6">
@@ -453,7 +608,7 @@ export default function Dashboard({ user, onLogout, darkMode, onToggleDarkMode }
               Trade<span className="text-emerald-500 dark:text-emerald-400">Sphere</span>
             </h1>
           </div>
-          {indices.length > 0 && (
+          {(indices.length > 0 || marketLive) && (
             <span className="text-xs text-green-600 dark:text-green-400 font-medium mr-2">Live</span>
           )}
           {(indices.length > 0 ? indices : MOCK_INDICES).map((idx) => (
@@ -507,9 +662,10 @@ export default function Dashboard({ user, onLogout, darkMode, onToggleDarkMode }
         {/* Left Panel - Zerodha-style Watchlist */}
         <aside className={`w-64 shrink-0 border-r flex flex-col ${darkMode ? 'border-slate-700 bg-slate-800' : 'border-gray-200 bg-gray-50'}`}>
           <div className="p-2 border-b border-gray-200 dark:border-slate-700 relative">
-            <input
-              type="text"
-              placeholder="Search: infy, nifty future, bank nifty option, MF"
+            <div className="flex gap-1">
+              <input
+                type="text"
+                placeholder="Search eg: infy bse, nifty fut, index fund, et"
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
               onFocus={() => searchSuggestions.length > 0 && setSearchSuggestionsOpen(true)}
@@ -520,15 +676,42 @@ export default function Dashboard({ user, onLogout, darkMode, onToggleDarkMode }
                     const first = searchSuggestions[0];
                     const key = first.key || `${first.exchange}:${first.tradingsymbol}`;
                     setWatchlist((prev) => (prev.includes(key) ? prev : [...prev, key]));
-                    saveWatchlist(watchlist.includes(key) ? watchlist : [...watchlist, key]);
                     setSearchQuery('');
                     setSearchSuggestions([]);
                     setSearchSuggestionsOpen(false);
                   } else addToWatchlist();
                 }
               }}
-              className={`w-full rounded border px-2 py-1.5 text-sm focus:ring-1 focus:ring-blue-500 focus:outline-none ${darkMode ? 'border-slate-600 bg-slate-700 text-slate-100 placeholder-slate-400' : 'border-gray-300 bg-white text-gray-900'}`}
+              className={`flex-1 min-w-0 rounded border px-2 py-1.5 text-sm focus:ring-1 focus:ring-blue-500 focus:outline-none ${darkMode ? 'border-slate-600 bg-slate-700 text-slate-100 placeholder-slate-400' : 'border-gray-300 bg-white text-gray-900'}`}
             />
+              <button type="button" onClick={() => setWatchlistFilterOpen((o) => !o)} title="Filter / Sort" className={`p-1.5 rounded border ${darkMode ? 'border-slate-600 bg-slate-700' : 'border-gray-300 bg-white'}`}>▤</button>
+            </div>
+            {watchlistFilterOpen && (
+              <div className={`mt-2 p-2 rounded border text-xs ${darkMode ? 'border-slate-600 bg-slate-700' : 'border-gray-200 bg-white'}`}>
+                <div className="mb-2 font-medium flex items-center gap-1">CHANGE TYPE <span title="Reference for change">ⓘ</span></div>
+                <label className="flex items-center gap-2 mb-1"><input type="radio" name="changeType" checked={watchlistChangeType === 'close'} onChange={() => setWatchlistChangeType('close')} /> Close price</label>
+                <label className="flex items-center gap-2 mb-2"><input type="radio" name="changeType" checked={watchlistChangeType === 'open'} onChange={() => setWatchlistChangeType('open')} /> Open price</label>
+                <div className="mb-2 font-medium">SHOW</div>
+                {['priceChange', 'priceChangePct', 'priceDirection', 'holdings', 'notes', 'groupColors'].map((k) => (
+                  <label key={k} className="flex items-center gap-2 mb-1">
+                    <input type="checkbox" checked={watchlistShow[k]} onChange={() => setWatchlistShow((p) => ({ ...p, [k]: !p[k] }))} />
+                    {k === 'priceChange' && 'Price change'}
+                    {k === 'priceChangePct' && 'Price change %'}
+                    {k === 'priceDirection' && 'Price direction'}
+                    {k === 'holdings' && 'Holdings'}
+                    {k === 'notes' && 'Notes'}
+                    {k === 'groupColors' && 'Group colors'}
+                  </label>
+                ))}
+                <div className="mb-2 font-medium mt-2">SORT BY</div>
+                <div className="flex flex-wrap gap-1">
+                  {['%', 'LTP', 'A-Z', 'EXCH'].map((opt) => (
+                    <button key={opt} type="button" onClick={() => setWatchlistSortBy(opt)} className={`px-2 py-1 rounded ${watchlistSortBy === opt ? 'bg-blue-600 text-white' : darkMode ? 'bg-slate-600' : 'bg-gray-200'}`}>{opt === '%' ? '%' : opt === 'LTP' ? 'LTP' : opt === 'A-Z' ? 'A-Z' : 'EXCH'}</button>
+                  ))}
+                </div>
+                <p className="text-gray-500 dark:text-slate-400 mt-1">Sort items within a group.</p>
+              </div>
+            )}
             {searchSuggestionsOpen && searchSuggestions.length > 0 && (
               <ul className={`absolute left-2 right-2 top-full mt-0.5 z-20 max-h-56 overflow-auto rounded border shadow-lg ${darkMode ? 'border-slate-600 bg-slate-800' : 'border-gray-200 bg-white'}`}>
                 {searchSuggestions.map((inst) => (
@@ -538,7 +721,6 @@ export default function Dashboard({ user, onLogout, darkMode, onToggleDarkMode }
                     onClick={() => {
                       const key = inst.key || `${inst.exchange}:${inst.tradingsymbol}`;
                       setWatchlist((prev) => (prev.includes(key) ? prev : [...prev, key]));
-                      saveWatchlist(watchlist.includes(key) ? watchlist : [...watchlist, key]);
                       setSearchQuery('');
                       setSearchSuggestions([]);
                       setSearchSuggestionsOpen(false);
@@ -556,40 +738,66 @@ export default function Dashboard({ user, onLogout, darkMode, onToggleDarkMode }
             )}
             <p className="mt-1 text-xs text-gray-500 dark:text-slate-500">Ctrl+K to search</p>
           </div>
-          <div className="p-2 flex items-center justify-between">
-            <span className="text-xs font-semibold text-gray-600 dark:text-slate-400">Watchlist 1 ({watchlist.length}/250)</span>
-            <button type="button" className="text-xs text-blue-600 dark:text-blue-400 hover:underline">+ New group</button>
+          <div className="p-2 flex items-center justify-between gap-1">
+            <select
+              value={watchlistGroups.activeId}
+              onChange={(e) => switchWatchlistGroup(e.target.value)}
+              className={`flex-1 min-w-0 text-xs font-semibold rounded border py-1 px-1.5 ${darkMode ? 'bg-slate-700 border-slate-600 text-slate-200' : 'bg-white border-gray-300 text-gray-700'}`}
+              title="Switch watchlist group"
+            >
+              {watchlistGroups.groups.map((g) => (
+                <option key={g.id} value={g.id}>{g.name} ({g.symbols.length}/250)</option>
+              ))}
+            </select>
+            <button type="button" onClick={addWatchlistGroup} className="text-xs text-blue-600 dark:text-blue-400 hover:underline shrink-0 whitespace-nowrap">+ New group</button>
           </div>
-          <div className="px-2 text-xs font-medium text-gray-500 dark:text-slate-500">Default ({watchlist.length})</div>
+          <div className="px-2 text-xs font-medium text-gray-500 dark:text-slate-500">{activeGroup?.name ?? 'Default'} ({watchlist.length})</div>
           <ul className="flex-1 overflow-auto min-h-0 text-sm">
-            {watchlist.map((s) => {
+            {sortedWatchlist.map((s) => {
               const displaySymbol = s.includes(':') ? s.split(':')[1] : s;
               let quoteKey = s.includes(':') ? s.split(':')[1] : (s === 'NIFTY50' ? 'NIFTY 50' : s);
               if (quoteKey === 'NIFTYBANK') quoteKey = 'NIFTY BANK';
               const realQuote = quotes[quoteKey];
               const q = realQuote ? { lastPrice: realQuote.lastPrice, change: realQuote.change, changePercent: realQuote.changePercent } : getMockQuote(displaySymbol);
               const isSelected = symbol === s;
+              const optionsOpen = watchlistOptionsOpen === s;
               return (
                 <li
                   key={s}
-                  className={`group flex items-center justify-between gap-1 py-1.5 px-2 border-b cursor-pointer ${isSelected ? 'bg-blue-50 dark:bg-blue-900/20 border-blue-200 dark:border-blue-800' : darkMode ? 'border-slate-700 hover:bg-slate-700' : 'border-gray-100 hover:bg-gray-200'}`}
-                  onClick={() => setSymbol(s)}
+                  className={`group flex items-center gap-0.5 py-1.5 px-2 border-b ${isSelected ? 'bg-blue-50 dark:bg-blue-900/20 border-blue-200 dark:border-blue-800' : darkMode ? 'border-slate-700 hover:bg-slate-700' : 'border-gray-100 hover:bg-gray-200'}`}
                 >
-                  <div className="min-w-0 flex-1">
-                    <div className="font-medium truncate">{displaySymbol}</div>
-                    <div className="flex items-center gap-2 text-xs">
-                      <span className={q.change < 0 ? 'text-red-500' : 'text-green-500'}>{q.change >= 0 ? '+' : ''}{q.change} ({q.changePercent}%)</span>
-                      <span className={darkMode ? 'text-slate-400' : 'text-gray-500'}>{q.lastPrice.toFixed(2)}</span>
+                  <div className="min-w-0 flex-1 flex items-center gap-1 cursor-pointer" onClick={() => setSymbol(s)}>
+                    <div className="min-w-0 flex-1">
+                      <div className="font-medium truncate">{displaySymbol}{s.includes('NIFTY') || s.includes('SENSEX') ? ' INDEX' : ''}</div>
+                      <div className="flex items-center gap-2 text-xs">
+                        {watchlistShow.priceChange && <span className={q.change < 0 ? 'text-red-500' : 'text-green-500'}>{q.change >= 0 ? '+' : ''}{q.change}</span>}
+                        {watchlistShow.priceChangePct && <span className={q.change < 0 ? 'text-red-500' : 'text-green-500'}>({q.changePercent}%)</span>}
+                        {watchlistShow.priceDirection && <span className={q.change < 0 ? 'text-red-500' : 'text-green-500'}>{q.change < 0 ? '▼' : '▲'}</span>}
+                        <span className={darkMode ? 'text-slate-400' : 'text-gray-500'}>{q.lastPrice.toFixed(2)}</span>
+                      </div>
                     </div>
                   </div>
-                  <button
-                    type="button"
-                    onClick={(e) => { e.stopPropagation(); removeFromWatchlist(s); }}
-                    className="opacity-0 group-hover:opacity-100 p-0.5 rounded hover:bg-red-100 dark:hover:bg-red-900/30 text-red-600 dark:text-red-400"
-                    aria-label={`Remove ${s}`}
-                  >
-                    ×
-                  </button>
+                  <div className="flex items-center gap-0.5 opacity-0 group-hover:opacity-100" onClick={(e) => e.stopPropagation()}>
+                    <button type="button" onClick={() => { setSymbol(s); setMainNav('dashboard'); }} className="p-1 rounded bg-green-600 text-white hover:bg-green-700" title="Buy">▲</button>
+                    <button type="button" onClick={() => { setSymbol(s); setMainNav('dashboard'); }} className="p-1 rounded bg-red-600 text-white hover:bg-red-700" title="Sell">▼</button>
+                    <button type="button" onClick={() => { setMarketDepthSymbol(s); setWatchlistOptionsOpen(null); }} className="p-1 rounded border border-gray-300 dark:border-slate-600 bg-white dark:bg-slate-700 hover:bg-gray-100 dark:hover:bg-slate-600" title="Market Depth (D)">≡</button>
+                    <button type="button" onClick={() => { setSymbol(s); setWatchlistOptionsOpen(null); setMainNav('dashboard'); }} className="p-1 rounded border border-gray-300 dark:border-slate-600 bg-white dark:bg-slate-700 hover:bg-gray-100 dark:hover:bg-slate-600" title="Chart (C)">📈</button>
+                    <button type="button" onClick={() => removeFromWatchlist(s)} className="p-1 rounded border border-gray-300 dark:border-slate-600 bg-white dark:bg-slate-700 hover:bg-red-100 dark:hover:bg-red-900/30 text-red-600" title="Delete">🗑</button>
+                    <div className="relative">
+                      <button type="button" onClick={() => setWatchlistOptionsOpen(optionsOpen ? null : s)} className="p-1 rounded border border-gray-300 dark:border-slate-600 bg-white dark:bg-slate-700 hover:bg-gray-100 dark:hover:bg-slate-600" title="Options">⋮</button>
+                      {optionsOpen && (
+                        <div className={`absolute left-0 top-full mt-0.5 z-30 min-w-[160px] py-1 rounded border shadow-lg ${darkMode ? 'bg-slate-800 border-slate-600' : 'bg-white border-gray-200'}`}>
+                          <button type="button" onClick={() => { setOptionChainExpiry(null); setOptionChainSymbol(s); setWatchlistOptionsOpen(null); }} className="w-full text-left px-3 py-1.5 text-xs hover:bg-gray-100 dark:hover:bg-slate-700">Option chain</button>
+                          <button type="button" onClick={() => { setMarketDepthSymbol(s); setWatchlistOptionsOpen(null); }} className="w-full text-left px-3 py-1.5 text-xs hover:bg-gray-100 dark:hover:bg-slate-700">Market depth</button>
+                          <button type="button" onClick={() => { setSymbol(s); setWatchlistOptionsOpen(null); setMainNav('dashboard'); }} className="w-full text-left px-3 py-1.5 text-xs hover:bg-gray-100 dark:hover:bg-slate-700">Chart</button>
+                          <button type="button" className="w-full text-left px-3 py-1.5 text-xs hover:bg-gray-100 dark:hover:bg-slate-700">Create alert / ATO</button>
+                          <button type="button" className="w-full text-left px-3 py-1.5 text-xs hover:bg-gray-100 dark:hover:bg-slate-700">Notes</button>
+                          <button type="button" className="w-full text-left px-3 py-1.5 text-xs hover:bg-gray-100 dark:hover:bg-slate-700">Fundamentals</button>
+                          <button type="button" className="w-full text-left px-3 py-1.5 text-xs hover:bg-gray-100 dark:hover:bg-slate-700">Technicals</button>
+                        </div>
+                      )}
+                    </div>
+                  </div>
                 </li>
               );
             })}
@@ -706,8 +914,11 @@ export default function Dashboard({ user, onLogout, darkMode, onToggleDarkMode }
                 return (
                   <aside className={`w-72 shrink-0 flex flex-col border-l ${darkMode ? 'border-slate-700 bg-slate-800' : 'border-gray-200 bg-white'}`}>
                     <div className="p-3 border-b border-gray-200 dark:border-slate-700">
-                      <h3 className="text-sm font-semibold text-gray-900 dark:text-slate-100">Order</h3>
-                      <p className="text-xs text-gray-500 dark:text-slate-400 mt-0.5">Scrip from watchlist or search</p>
+                      <div className="flex items-center justify-between gap-2">
+                        <h3 className="text-sm font-semibold text-gray-900 dark:text-slate-100">Order</h3>
+                        <span className={`text-[10px] font-medium px-1.5 py-0.5 rounded ${tradingMode === 'paper' ? 'bg-amber-100 text-amber-800 dark:bg-amber-900/40 dark:text-amber-200' : 'bg-emerald-100 text-emerald-800 dark:bg-emerald-900/40 dark:text-emerald-200'}`}>{tradingMode === 'paper' ? 'Paper' : 'Live'}</span>
+                      </div>
+                      <p className="text-xs text-gray-500 dark:text-slate-400 mt-0.5">{tradingMode === 'paper' ? 'Simulated on TradeSphere' : 'Scrip from watchlist or search'}</p>
                     </div>
                     <div className="p-3 flex flex-col gap-3 flex-1 min-h-0">
                       <div>
@@ -741,8 +952,8 @@ export default function Dashboard({ user, onLogout, darkMode, onToggleDarkMode }
                         </div>
                       )}
                       <div className="grid grid-cols-2 gap-2 mt-auto pt-2">
-                        <button type="button" onClick={() => placeKiteOrder('BUY')} disabled={kiteOrderLoading || (optionsRequireLimit && !orderPrice)} className="rounded py-2.5 text-sm font-medium text-white bg-green-600 hover:bg-green-700 disabled:opacity-50 disabled:cursor-not-allowed">Buy</button>
-                        <button type="button" onClick={() => placeKiteOrder('SELL')} disabled={kiteOrderLoading || (optionsRequireLimit && !orderPrice)} className="rounded py-2.5 text-sm font-medium text-white bg-red-600 hover:bg-red-700 disabled:opacity-50 disabled:cursor-not-allowed">Sell</button>
+                        <button type="button" onClick={() => placeOrder('BUY')} disabled={kiteOrderLoading || (optionsRequireLimit && !orderPrice)} className="rounded py-2.5 text-sm font-medium text-white bg-green-600 hover:bg-green-700 disabled:opacity-50 disabled:cursor-not-allowed">Buy</button>
+                        <button type="button" onClick={() => placeOrder('SELL')} disabled={kiteOrderLoading || (optionsRequireLimit && !orderPrice)} className="rounded py-2.5 text-sm font-medium text-white bg-red-600 hover:bg-red-700 disabled:opacity-50 disabled:cursor-not-allowed">Sell</button>
                       </div>
                       <p className="text-[10px] text-gray-400 dark:text-slate-500">Kite · F&O: MIS/NRML · Options: Limit</p>
                     </div>
@@ -912,11 +1123,28 @@ export default function Dashboard({ user, onLogout, darkMode, onToggleDarkMode }
               </div>
 
               <div className={`rounded-lg border p-4 ${darkMode ? 'border-slate-700 bg-slate-800' : 'border-gray-200 bg-white'}`}>
-                <h3 className="font-semibold mb-2">Pledge for trading margin</h3>
-                <p className="text-sm text-gray-600 dark:text-slate-400 mb-3">Pledge your holdings (equity/MF) to get collateral margin. Pledging is done via CDSL Easiest / Zerodha Console, not in-app.</p>
-                <a href="https://cdsl.easiest.in/" target="_blank" rel="noopener noreferrer" className="text-sm text-blue-600 dark:text-blue-400 hover:underline">CDSL Easiest →</a>
-                <span className="text-gray-400 mx-2">·</span>
-                <a href="https://console.zerodha.com/" target="_blank" rel="noopener noreferrer" className="text-sm text-blue-600 dark:text-blue-400 hover:underline">Zerodha Console</a>
+                <div className="flex items-center justify-between gap-2 mb-2">
+                  <h3 className="font-semibold">Trading mode</h3>
+                  <div className="flex rounded overflow-hidden border border-gray-300 dark:border-slate-600">
+                    <button type="button" onClick={() => setTradingMode('paper')} className={`px-3 py-1.5 text-xs font-medium ${tradingMode === 'paper' ? 'bg-emerald-600 text-white' : darkMode ? 'bg-slate-700 text-slate-400' : 'bg-gray-100 text-gray-600'}`}>Paper</button>
+                    <button type="button" onClick={() => setTradingMode('live')} className={`px-3 py-1.5 text-xs font-medium ${tradingMode === 'live' ? 'bg-emerald-600 text-white' : darkMode ? 'bg-slate-700 text-slate-400' : 'bg-gray-100 text-gray-600'}`}>Live (Kite)</button>
+                  </div>
+                </div>
+                {tradingMode === 'paper' ? (
+                  <>
+                    <h3 className="font-semibold mb-2">Pledge & margin (Paper)</h3>
+                    <p className="text-sm text-gray-600 dark:text-slate-400 mb-2">All balance, collateral, and orders are simulated on TradeSphere. No external broker links—everything stays here.</p>
+                    <p className="text-sm text-gray-500 dark:text-slate-500">Paper collateral: use your simulated holdings as margin for F&O. Place orders from the Order panel; they are tracked in-app only.</p>
+                  </>
+                ) : (
+                  <>
+                    <h3 className="font-semibold mb-2">Pledge for trading margin (Live)</h3>
+                    <p className="text-sm text-gray-600 dark:text-slate-400 mb-3">Pledge your real holdings (equity/MF) via CDSL to get collateral. Then place live orders on this site via Kite.</p>
+                    <a href="https://cdsl.easiest.in/" target="_blank" rel="noopener noreferrer" className="text-sm text-blue-600 dark:text-blue-400 hover:underline">CDSL Easiest →</a>
+                    <span className="text-gray-400 mx-2">·</span>
+                    <a href="https://console.zerodha.com/" target="_blank" rel="noopener noreferrer" className="text-sm text-blue-600 dark:text-blue-400 hover:underline">Zerodha Console</a>
+                  </>
+                )}
               </div>
 
               <div className={`rounded-lg border overflow-hidden ${darkMode ? 'border-slate-700 bg-slate-800' : 'border-gray-200 bg-white'}`}>
@@ -983,6 +1211,115 @@ export default function Dashboard({ user, onLogout, darkMode, onToggleDarkMode }
           )}
         </main>
       </div>
+
+      {/* Quick order: when user clicks Buy/Sell on watchlist, symbol is set so order panel is ready */}
+
+      {/* Option Chain modal */}
+      {optionChainSymbol && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4" onClick={() => { setOptionChainSymbol(null); setOptionChainExpiry(null); setOptionChainData(null); }}>
+          <div className={`max-w-4xl w-full max-h-[90vh] overflow-auto rounded-lg shadow-xl ${darkMode ? 'bg-slate-800 border border-slate-600' : 'bg-white border border-gray-200'}`} onClick={(e) => e.stopPropagation()}>
+            <div className="sticky top-0 flex items-center justify-between p-4 border-b border-gray-200 dark:border-slate-700 bg-inherit">
+              <h2 className="text-lg font-semibold">Option chain — {optionChainSymbol.includes(':') ? optionChainSymbol.split(':')[1] : optionChainSymbol}</h2>
+              <button type="button" onClick={() => { setOptionChainSymbol(null); setOptionChainExpiry(null); setOptionChainData(null); }} className="p-2 rounded hover:bg-gray-100 dark:hover:bg-slate-700">×</button>
+            </div>
+            <div className="p-4">
+              {optionChainLoading ? (
+                <div className="py-12 text-center text-gray-500 dark:text-slate-400">Loading option chain…</div>
+              ) : optionChainData?.error ? (
+                <p className="py-4 text-amber-600 dark:text-amber-400">{optionChainData.error}</p>
+              ) : optionChainData?.message && !optionChainData?.chain?.length ? (
+                <p className="py-4 text-gray-600 dark:text-slate-400">{optionChainData.message}</p>
+              ) : (
+                <>
+                  <div className="flex flex-wrap gap-2 mb-4 items-center">
+                    {(optionChainData?.expiries || []).map((exp) => {
+                      const d = exp.slice(0, 10);
+                      const active = (optionChainData?.selectedExpiry || '').slice(0, 10) === d || optionChainExpiry === d;
+                      const label = d ? (() => { const [y, m, day] = d.split('-'); const months = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec']; return `${day} ${months[Number(m) - 1]}`; })() : exp;
+                      return (
+                        <button key={exp} type="button" onClick={() => setOptionChainExpiry(d)} className={`px-3 py-1.5 rounded border text-sm ${active ? 'bg-blue-600 text-white border-blue-600' : darkMode ? 'border-slate-600 hover:bg-slate-700' : 'border-gray-300 hover:bg-gray-100'}`}>{label}</button>
+                      );
+                    })}
+                    <span className="ml-2 text-xs text-gray-500 self-center">OI</span>
+                    <button type="button" className="px-2 py-1 text-xs rounded border border-gray-300 dark:border-slate-600">Greeks</button>
+                  </div>
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-sm">
+                      <thead>
+                        <tr className="border-b border-gray-200 dark:border-slate-600">
+                          <th className="text-left py-2 pr-2">Call OI (L)</th>
+                          <th className="text-left py-2 pr-2">Call LTP</th>
+                          <th className="text-left py-2 pr-2 font-medium">Strike</th>
+                          <th className="text-left py-2 pr-2">Put LTP</th>
+                          <th className="text-left py-2">Put OI (L)</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {(optionChainData?.chain || []).map((row) => (
+                          <tr key={row.strike} className="border-b border-gray-100 dark:border-slate-700">
+                            <td className="py-1.5 pr-2 text-gray-600 dark:text-slate-400">{row.call_oi != null ? (row.call_oi / 1e5).toFixed(2) : '—'}</td>
+                            <td className="py-1.5 pr-2 text-green-600 dark:text-green-400">{row.call_ltp != null ? Number(row.call_ltp).toFixed(2) : '—'}</td>
+                            <td className="py-1.5 pr-2 font-medium">{Number(row.strike).toLocaleString('en-IN')}</td>
+                            <td className="py-1.5 pr-2 text-red-600 dark:text-red-400">{row.put_ltp != null ? Number(row.put_ltp).toFixed(2) : '—'}</td>
+                            <td className="py-1.5 text-gray-600 dark:text-slate-400">{row.put_oi != null ? (row.put_oi / 1e5).toFixed(2) : '—'}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                  {optionChainData?.chain?.length > 0 && (() => {
+                    const totalCallOi = (optionChainData.chain || []).reduce((s, r) => s + (r.call_oi || 0), 0);
+                    const totalPutOi = (optionChainData.chain || []).reduce((s, r) => s + (r.put_oi || 0), 0);
+                    const pcr = totalCallOi > 0 ? (totalPutOi / totalCallOi).toFixed(2) : '—';
+                    return (
+                      <div className="mt-4 flex gap-6 text-xs text-gray-500 dark:text-slate-400">
+                        <span>PCR: {pcr}</span>
+                        <span>Max Pain: —</span>
+                        <span>ATM IV: —</span>
+                      </div>
+                    );
+                  })()}
+                </>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Market Depth modal */}
+      {marketDepthSymbol && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4" onClick={() => setMarketDepthSymbol(null)}>
+          <div className={`max-w-2xl w-full max-h-[90vh] overflow-auto rounded-lg shadow-xl ${darkMode ? 'bg-slate-800 border border-slate-600' : 'bg-white border border-gray-200'}`} onClick={(e) => e.stopPropagation()}>
+            <div className="sticky top-0 flex items-center justify-between p-4 border-b border-gray-200 dark:border-slate-700 bg-inherit">
+              <h2 className="text-lg font-semibold">Market depth — {marketDepthSymbol.includes(':') ? marketDepthSymbol.split(':')[1] : marketDepthSymbol}</h2>
+              <button type="button" onClick={() => setMarketDepthSymbol(null)} className="p-2 rounded hover:bg-gray-100 dark:hover:bg-slate-700">×</button>
+            </div>
+            <div className="p-4">
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="border-b border-gray-200 dark:border-slate-600 text-gray-600 dark:text-slate-400">
+                    <th className="text-left py-2">Bid Qty</th>
+                    <th className="text-left py-2">Bid</th>
+                    <th className="text-left py-2">Ask</th>
+                    <th className="text-left py-2">Ask Qty</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {[5, 4, 3, 2, 1].map((i) => (
+                    <tr key={i} className="border-b border-gray-100 dark:border-slate-700">
+                      <td className="py-1.5 text-green-600 dark:text-green-400">—</td>
+                      <td className="py-1.5 text-green-600 dark:text-green-400">—</td>
+                      <td className="py-1.5 text-red-600 dark:text-red-400">—</td>
+                      <td className="py-1.5 text-red-600 dark:text-red-400">—</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+              <p className="mt-2 text-xs text-gray-500 dark:text-slate-500">Connect Kite for live market depth (order book).</p>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Collapsible Feed (optional) - keep for social */}
       <details className="border-t border-gray-200 dark:border-slate-700 bg-white dark:bg-slate-800">

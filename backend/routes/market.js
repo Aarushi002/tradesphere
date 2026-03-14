@@ -324,6 +324,133 @@ function getRangeParams(range) {
   return { from, to, interval };
 }
 
+// Map display symbol to NFO underlying prefix for option chain (index options)
+function symbolToNfoUnderlying(symbol) {
+  const s = (symbol || '').toString().trim().toUpperCase().replace(/\s+/g, '');
+  if (s === 'NIFTY50' || s === 'NIFTY 50') return 'NIFTY';
+  if (s === 'NIFTYBANK' || s === 'NIFTY BANK') return 'BANKNIFTY';
+  if (s === 'FINNIFTY' || s === 'FIN NIFTY') return 'FINNIFTY';
+  if (s === 'MIDCPNIFTY' || s === 'MIDCP NIFTY') return 'MIDCPNIFTY';
+  if (s === 'SENSEX') return 'SENSEX'; // BSE index, may have NFO options
+  return s;
+}
+
+// GET /api/market/option-chain?symbol=NIFTY50&expiry=2024-03-28 (expiry optional, YYYY-MM-DD)
+router.get('/option-chain', async (req, res) => {
+  try {
+    const rawSymbol = (req.query.symbol || '').toString().trim();
+    const expiryParam = (req.query.expiry || '').toString().trim(); // YYYY-MM-DD optional
+    if (!rawSymbol) {
+      return res.status(400).json({ error: 'symbol is required (e.g. NIFTY50, NIFTY BANK)' });
+    }
+    if (!apiKey || !accessToken) {
+      return res.status(503).json({
+        error: 'Market data unavailable',
+        message: 'Set KITE_API_KEY and KITE_ACCESS_TOKEN for option chain.',
+      });
+    }
+
+    const underlying = symbolToNfoUnderlying(rawSymbol.includes(':') ? rawSymbol.split(':')[1] : rawSymbol);
+    const list = await loadInstruments();
+    const nfoOptions = list.filter(
+      (i) => i.exchange === 'NFO' && (i.instrument_type === 'CE' || i.instrument_type === 'PE')
+    );
+
+    // Parse tradingsymbol: NIFTY24MAR23150CE -> { underlying: NIFTY, expiryStr: 24MAR, strike: 23150, type: CE }
+    const parseOptionSymbol = (ts) => {
+      const m = (ts || '').match(/^(.+?)(\d{2}[A-Z]{3})(\d+)(CE|PE)$/);
+      if (!m) return null;
+      return { underlying: m[1], expiryStr: m[2], strike: Number(m[3]), type: m[4] };
+    };
+
+    const optionsForUnderlying = nfoOptions.filter((i) => {
+      const p = parseOptionSymbol(i.tradingsymbol);
+      return p && p.underlying === underlying;
+    });
+
+    if (optionsForUnderlying.length === 0) {
+      return res.json({
+        symbol: rawSymbol,
+        underlying,
+        expiries: [],
+        chain: [],
+        message: 'No NFO options found for this underlying. Try NIFTY50 or NIFTY BANK.',
+      });
+    }
+
+    // Build expiry list (unique, sorted) as YYYY-MM-DD strings
+    const expirySet = new Set();
+    optionsForUnderlying.forEach((i) => {
+      const exp = i.expiry;
+      if (exp) {
+        const d = typeof exp === 'string' ? exp.slice(0, 10) : (exp instanceof Date ? exp.toISOString().slice(0, 10) : '');
+        if (d) expirySet.add(d);
+      }
+    });
+    const expiries = [...expirySet].sort();
+
+    // If expiry param given, use it; else use nearest future expiry
+    let selectedExpiry = expiryParam;
+    if (!selectedExpiry && expiries.length > 0) {
+      const today = new Date().toISOString().slice(0, 10);
+      selectedExpiry = expiries.find((e) => e >= today) || expiries[expiries.length - 1];
+    }
+
+    const toExpiryStr = (d) => (d instanceof Date ? d.toISOString().slice(0, 10) : (typeof d === 'string' ? d.slice(0, 10) : ''));
+    const instrumentsForExpiry = optionsForUnderlying.filter((i) => toExpiryStr(i.expiry) === selectedExpiry);
+
+    const keys = instrumentsForExpiry.map((i) => `${i.exchange}:${i.tradingsymbol}`);
+    if (keys.length === 0) {
+      return res.json({ symbol: rawSymbol, underlying, expiries, selectedExpiry, chain: [] });
+    }
+
+    const kc = getKite();
+    const quoteResponse = await kc.getQuote(keys);
+    const quoteMap = quoteResponse && typeof quoteResponse === 'object' && !Array.isArray(quoteResponse) ? quoteResponse : {};
+
+    const byStrike = {};
+    instrumentsForExpiry.forEach((i) => {
+      const strike = Number(i.strike) || 0;
+      if (!byStrike[strike]) byStrike[strike] = { strike, call: null, put: null };
+      const key = `${i.exchange}:${i.tradingsymbol}`;
+      const q = quoteMap[key] || {};
+      const ltp = q.last_price != null ? Number(q.last_price) : null;
+      const oi = q.oi != null ? Number(q.oi) : null;
+      const row = { ltp, oi, tradingsymbol: i.tradingsymbol };
+      if (i.instrument_type === 'CE') byStrike[strike].call = row;
+      else byStrike[strike].put = row;
+    });
+
+    const strikes = Object.keys(byStrike)
+      .map(Number)
+      .sort((a, b) => a - b);
+    const chain = strikes.map((strike) => {
+      const r = byStrike[strike];
+      return {
+        strike,
+        call_ltp: r.call?.ltp ?? null,
+        call_oi: r.call?.oi ?? null,
+        put_ltp: r.put?.ltp ?? null,
+        put_oi: r.put?.oi ?? null,
+      };
+    });
+
+    res.json({
+      symbol: rawSymbol,
+      underlying,
+      expiries,
+      selectedExpiry,
+      chain,
+    });
+  } catch (err) {
+    console.error('Error fetching option chain', err?.message || err);
+    res.status(500).json({
+      error: err?.message || 'Failed to fetch option chain',
+      details: err?.data || err?.response || null,
+    });
+  }
+});
+
 // GET /api/market/candles?symbol=RELIANCE&range=6d  (range: 1d, 6d, 14d, 52w, ytd, 1m, 3m)
 router.get('/candles', async (req, res) => {
   try {
