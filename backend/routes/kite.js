@@ -90,6 +90,11 @@ router.get('/callback', async (req, res) => {
   const apiKey = getKiteApiKey();
   const apiSecret = getKiteApiSecret();
   let frontendUrl = getFrontendUrl();
+  // When callback runs on production (e.g. Render), never redirect to localhost — use env even if getFrontendUrl() fell back to localhost
+  const requestHost = (req.get('host') || req.hostname || '').toLowerCase();
+  if (requestHost && !requestHost.includes('localhost') && frontendUrl && frontendUrl.includes('localhost')) {
+    frontendUrl = process.env.FRONTEND_URL || process.env.KITE_FRONTEND_URL || frontendUrl;
+  }
 
   if (!apiKey || !apiSecret) {
     return res.redirect(`${frontendUrl}?kite_error=missing_api_secret`);

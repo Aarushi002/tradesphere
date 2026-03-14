@@ -51,8 +51,9 @@ For live candles and real-time prices you need Zerodha Kite API.
    ```
    **If you see "Set KITE_API_KEY in backend .env"**: locally, ensure the backend is started from the `backend` folder so `backend/.env` is loaded; in production, add `KITE_API_KEY` and `KITE_API_SECRET` in your host's env vars.
 2. In [Kite developer console](https://developers.kite.trade/), set your app’s **Redirect URL** to:
-   - Local: `http://localhost:5000/api/kite/callback`
-   - Production: `https://your-backend-domain.com/api/kite/callback`
+   - **Deployed app (Vercel + Render):** use your Render callback URL, e.g. `https://tradesphere-fall1.onrender.com/api/kite/callback`. If you use localhost here, you'll get `localhost:3000/?kite_refreshed=1` after Kite login.
+   - Local only: `http://localhost:5000/api/kite/callback`
+   - Kite allows one redirect URL; use the one that matches where your frontend runs.
 3. (Optional) Get the first token manually:
    ```bash
    node scripts/get-kite-token.js <request_token>
