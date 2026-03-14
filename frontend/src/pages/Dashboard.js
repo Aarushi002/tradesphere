@@ -436,14 +436,15 @@ export default function Dashboard({ user, onLogout, darkMode, onToggleDarkMode }
           kiteRedirectDoneRef.current = true;
           setKiteAutoConnecting(true);
           // Auto-capture frontend URL so backend knows where to redirect after Kite login (no FRONTEND_URL env needed)
+          const origin = window.location.origin;
           fetch(`${API_URL}/api/kite/set-redirect-origin`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ origin: window.location.origin }),
+            body: JSON.stringify({ origin }),
           })
             .catch(() => {})
             .finally(() => {
-              window.location.href = `${API_URL}/api/kite/login?for=market`;
+              window.location.href = `${API_URL}/api/kite/login?for=market&redirect_origin=${encodeURIComponent(origin)}`;
             });
         }
       })
@@ -1051,8 +1052,9 @@ export default function Dashboard({ user, onLogout, darkMode, onToggleDarkMode }
                     setKiteSetupOpen(false);
                     kiteRedirectDoneRef.current = true;
                     setKiteAutoConnecting(true);
-                    fetch(`${API_URL}/api/kite/set-redirect-origin`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ origin: window.location.origin }) }).catch(() => {});
-                    window.location.href = `${API_URL}/api/kite/login?for=market`;
+                    const origin = window.location.origin;
+                    fetch(`${API_URL}/api/kite/set-redirect-origin`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ origin }) }).catch(() => {});
+                    window.location.href = `${API_URL}/api/kite/login?for=market&redirect_origin=${encodeURIComponent(origin)}`;
                   } catch (e) {
                     setKiteSetupError(e.message || 'Failed');
                   } finally {

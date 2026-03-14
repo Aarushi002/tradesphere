@@ -35,7 +35,36 @@ function requireKite(req, res, next) {
   next();
 }
 
-// GET /api/kite/login - No auth: state=market (app-level market data). ?for=market forces state=market so one login enables live data for everyone.
+// Allowed redirect origins (for post-Kite callback). Env ALLOWED_REDIRECT_ORIGINS = comma-separated list.
+function getAllowedRedirectOrigins() {
+  const fromEnv = (process.env.ALLOWED_REDIRECT_ORIGINS || process.env.FRONTEND_URL || '')
+    .split(',')
+    .map((s) => s.trim())
+    .filter(Boolean);
+  const def = getFrontendUrl();
+  if (def && !fromEnv.includes(def)) fromEnv.push(def);
+  return fromEnv;
+}
+
+function isAllowedRedirectOrigin(origin) {
+  if (!origin || typeof origin !== 'string') return false;
+  const o = origin.trim();
+  if (!o.startsWith('https://')) return false;
+  try {
+    const u = new URL(o);
+    if (u.pathname !== '/' && u.pathname !== '') return false; // origin should be scheme+host only
+    const allowed = getAllowedRedirectOrigins();
+    if (allowed.includes(o)) return true;
+    // Allow *.vercel.app and *.onrender.com
+    const host = (u.hostname || '').toLowerCase();
+    if (host.endsWith('.vercel.app') || host.endsWith('.onrender.com')) return true;
+    return false;
+  } catch (_) {
+    return false;
+  }
+}
+
+// GET /api/kite/login - No auth: state=market (app-level market data). ?for=market&redirect_origin=https://... sends user back there after Kite.
 router.get('/login', optionalAuth, (req, res) => {
   const apiKey = getKiteApiKey();
   if (!apiKey) {
@@ -45,19 +74,22 @@ router.get('/login', optionalAuth, (req, res) => {
     });
   }
   const forMarket = (req.query.for || '').toString().toLowerCase() === 'market';
-  const statePlain = forMarket ? 'market' : (req.userId ? String(req.userId) : 'market');
-  const stateB64 = Buffer.from(statePlain, 'utf8').toString('base64').replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+  const redirectOrigin = (req.query.redirect_origin || '').toString().trim();
+  const statePayload = forMarket
+    ? (isAllowedRedirectOrigin(redirectOrigin) ? `market|${redirectOrigin}` : 'market')
+    : (req.userId ? String(req.userId) : 'market');
+  const stateB64 = Buffer.from(statePayload, 'utf8').toString('base64').replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
   const url = `https://kite.zerodha.com/connect/login?v=3&api_key=${encodeURIComponent(apiKey)}&state=${encodeURIComponent(stateB64)}`;
   res.redirect(302, url);
 });
 
-// GET /api/kite/callback - state=market → set global market data token; else state=userId → set per-user token
+// GET /api/kite/callback - state=market → set global market data token; else state=userId → set per-user token. state can be "market|https://origin" to redirect there.
 router.get('/callback', async (req, res) => {
   const requestToken = (req.query.request_token || '').toString().trim();
   const stateRaw = (req.query.state || '').toString().trim();
   const apiKey = getKiteApiKey();
   const apiSecret = getKiteApiSecret();
-  const frontendUrl = getFrontendUrl();
+  let frontendUrl = getFrontendUrl();
 
   if (!apiKey || !apiSecret) {
     return res.redirect(`${frontendUrl}?kite_error=missing_api_secret`);
@@ -67,24 +99,33 @@ router.get('/callback', async (req, res) => {
   }
 
   let stateValue = null;
+  let redirectOriginFromState = null;
   if (stateRaw) {
-    // Accept plain "market" in case state was not encoded
     if (stateRaw === 'market') {
       stateValue = 'market';
     } else {
       try {
         const b64 = stateRaw.replace(/-/g, '+').replace(/_/g, '/');
         const padding = b64.length % 4 ? '='.repeat(4 - (b64.length % 4)) : '';
-        stateValue = Buffer.from(b64 + padding, 'base64').toString('utf8');
-        if (!stateValue || !stateValue.trim()) stateValue = null;
+        const decoded = Buffer.from(b64 + padding, 'base64').toString('utf8');
+        if (decoded && decoded.trim()) {
+          const pipe = decoded.indexOf('|');
+          if (pipe > -1) {
+            stateValue = decoded.slice(0, pipe).trim() || 'market';
+            const origin = decoded.slice(pipe + 1).trim();
+            if (isAllowedRedirectOrigin(origin)) redirectOriginFromState = origin;
+          } else {
+            stateValue = decoded;
+          }
+        }
       } catch (_) {}
     }
   }
   if (!stateValue) {
-    // If state is missing but we have request_token, default to 'market' so one-time connect still works (e.g. Kite or proxy dropped state)
     if (requestToken) stateValue = 'market';
     else return res.redirect(`${frontendUrl}?kite_error=invalid_state`);
   }
+  if (redirectOriginFromState) frontendUrl = redirectOriginFromState;
 
   const checksum = crypto.createHash('sha256').update(apiKey + requestToken + apiSecret).digest('hex');
   const body = new URLSearchParams({
