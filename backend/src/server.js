@@ -2,78 +2,74 @@ import './loadEnv.js';
 import express from 'express';
 import cors from 'cors';
 import morgan from 'morgan';
-import mongoose from 'mongoose';
-import authRoutes from '../routes/auth.js';
-import tradesRoutes from '../routes/trades.js';
-import portfolioRoutes from '../routes/portfolio.js';
-import stocksRoutes from '../routes/stocks.js';
-import leaderboardRoutes from '../routes/leaderboard.js';
-import socialRoutes from '../routes/social.js';
-import marketRoutes from '../routes/market.js';
-import kiteRoutes, { handleKiteCallback } from '../routes/kite.js';
 
 const app = express();
-
 app.use(cors());
 app.use(express.json());
 app.use(morgan('dev'));
 
+// Minimal routes first — no DB or heavy imports so the server always starts and Render marks it "live"
 app.get('/api/health', (req, res) => {
   res.json({ status: 'ok', service: 'tradesphere-backend' });
 });
-
 app.get('/api/test', (req, res) => {
   res.send('API is working');
 });
 
-// GET /api/kite/callback — must be GET; Zerodha redirects the browser here with request_token
-app.get('/api/kite/callback', handleKiteCallback);
-
-app.use('/api/auth', authRoutes);
-app.use('/api/trades', tradesRoutes);
-app.use('/api/portfolio', portfolioRoutes);
-app.use('/api/stocks', stocksRoutes);
-app.use('/api/leaderboard', leaderboardRoutes);
-app.use('/api/social', socialRoutes);
-app.use('/api/market', marketRoutes);
-app.use('/api/kite', kiteRoutes);
-
-app.use((req, res) => {
-  res.status(404).send('Not Found');
-});
-
 const PORT = process.env.PORT || 5000;
-const MONGO_URI = process.env.MONGO_URI || 'mongodb://localhost:27017/tradesphere';
 
-// Start HTTP server first so Render sees the app as "live" (avoids stuck "Application loading")
+// Start listening immediately so Render never gets stuck on "Application loading"
 app.listen(PORT, () => {
   console.log(`Server running on port ${PORT}`);
 });
 
-// Connect to MongoDB in background so a slow/failed DB doesn't block the server from starting
-mongoose.connect(MONGO_URI)
-  .then(async () => {
+// Load MongoDB and all other routes after listen (so a failing import/connect doesn't prevent the server from starting)
+const MONGO_URI = process.env.MONGO_URI || 'mongodb://localhost:27017/tradesphere';
+
+async function loadRest() {
+  const mongoose = (await import('mongoose')).default;
+  const authRoutes = (await import('../routes/auth.js')).default;
+  const tradesRoutes = (await import('../routes/trades.js')).default;
+  const portfolioRoutes = (await import('../routes/portfolio.js')).default;
+  const stocksRoutes = (await import('../routes/stocks.js')).default;
+  const leaderboardRoutes = (await import('../routes/leaderboard.js')).default;
+  const socialRoutes = (await import('../routes/social.js')).default;
+  const marketRoutes = (await import('../routes/market.js')).default;
+  const { default: kiteRoutes, handleKiteCallback } = await import('../routes/kite.js');
+
+  app.get('/api/kite/callback', handleKiteCallback);
+  app.use('/api/auth', authRoutes);
+  app.use('/api/trades', tradesRoutes);
+  app.use('/api/portfolio', portfolioRoutes);
+  app.use('/api/stocks', stocksRoutes);
+  app.use('/api/leaderboard', leaderboardRoutes);
+  app.use('/api/social', socialRoutes);
+  app.use('/api/market', marketRoutes);
+  app.use('/api/kite', kiteRoutes);
+  app.use((req, res) => res.status(404).send('Not Found'));
+
+  try {
+    await mongoose.connect(MONGO_URI);
     console.log('MongoDB connected');
-    try {
-      const Setting = (await import('../models/Setting.js')).default;
-      const { setMarketDataToken, setKiteConfig } = await import('./lib/kiteToken.js');
-      const docs = await Setting.find({ key: { $in: ['kite_api_key', 'kite_api_secret', 'frontend_url', 'kite_market_token'] } });
-      const byKey = {};
-      docs.forEach((d) => { if (d && d.key) byKey[d.key] = d.value; });
-      if (byKey.kite_api_key) setKiteConfig({ apiKey: byKey.kite_api_key });
-      if (byKey.kite_api_secret) setKiteConfig({ apiSecret: byKey.kite_api_secret });
-      if (byKey.frontend_url) setKiteConfig({ frontendUrl: byKey.frontend_url });
-      if (byKey.kite_market_token) {
-        setMarketDataToken(byKey.kite_market_token);
-        console.log('[kite] Restored market data token from DB');
-      }
-      if (byKey.kite_api_key) console.log('[kite] Loaded API config from DB');
-    } catch (e) {
-      // ignore if Setting model or token missing
+    const Setting = (await import('../models/Setting.js')).default;
+    const { setMarketDataToken, setKiteConfig } = await import('./lib/kiteToken.js');
+    const docs = await Setting.find({ key: { $in: ['kite_api_key', 'kite_api_secret', 'frontend_url', 'kite_market_token'] } });
+    const byKey = {};
+    docs.forEach((d) => { if (d && d.key) byKey[d.key] = d.value; });
+    if (byKey.kite_api_key) setKiteConfig({ apiKey: byKey.kite_api_key });
+    if (byKey.kite_api_secret) setKiteConfig({ apiSecret: byKey.kite_api_secret });
+    if (byKey.frontend_url) setKiteConfig({ frontendUrl: byKey.frontend_url });
+    if (byKey.kite_market_token) {
+      setMarketDataToken(byKey.kite_market_token);
+      console.log('[kite] Restored market data token from DB');
     }
-  })
-  .catch((err) => {
+    if (byKey.kite_api_key) console.log('[kite] Loaded API config from DB');
+  } catch (err) {
     console.error('MongoDB connection failed:', err.message);
-    // Server is already listening; API routes that need DB will fail until MONGO_URI is fixed
-  });
+  }
+}
+
+loadRest().catch((err) => {
+  console.error('Failed to load routes/DB:', err);
+});
 
