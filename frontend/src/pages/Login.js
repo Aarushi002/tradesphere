@@ -127,10 +127,14 @@ export default function Login({ onLogin }) {
     { left: '94%', height: 160, color: 'red', duration: 9.3, delay: -3.6 },
   ];
 
+  const LOGIN_TIMEOUT_MS = 25000; // 25s — backend on free tier can take ~1 min to wake
+
   async function handleSubmit(e) {
     e.preventDefault();
     setError('');
     setLoading(true);
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), LOGIN_TIMEOUT_MS);
     try {
       const url = isRegister ? `${API_URL}/api/auth/register` : `${API_URL}/api/auth/login`;
       const body = isRegister ? { name, email, password } : { email, password };
@@ -138,17 +142,22 @@ export default function Login({ onLogin }) {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(body),
+        signal: controller.signal,
       });
+      clearTimeout(timeoutId);
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || 'Request failed');
       localStorage.setItem('token', data.token);
       localStorage.setItem('user', JSON.stringify(data.user));
       onLogin(data.user);
     } catch (err) {
+      clearTimeout(timeoutId);
       const message =
-        err.message === 'Failed to fetch'
-          ? 'Cannot reach the server. Make sure the backend is running (e.g. npm start in the backend folder).'
-          : err.message;
+        err.name === 'AbortError'
+          ? 'Server is taking too long. If the backend is on a free tier, it may be waking up — wait a minute and try again.'
+          : err.message === 'Failed to fetch'
+            ? 'Cannot reach the server. Check that the backend URL is correct and the service is running.'
+            : err.message;
       setError(message);
     } finally {
       setLoading(false);
