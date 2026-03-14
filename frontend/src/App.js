@@ -18,16 +18,23 @@ function App() {
     const root = document.documentElement;
     if (darkMode) {
       root.classList.add('dark');
+      root.setAttribute('data-theme', 'dark');
       localStorage.setItem(THEME_KEY, 'dark');
     } else {
       root.classList.remove('dark');
+      root.setAttribute('data-theme', 'light');
       localStorage.setItem(THEME_KEY, 'light');
     }
   }, [darkMode]);
 
   useEffect(() => {
+    const isDeployed = typeof window !== 'undefined' && !/localhost|127\.0\.0\.1/i.test(window.location.hostname);
     const token = localStorage.getItem('token');
     const saved = localStorage.getItem('user');
+    if (isDeployed) {
+      setAuthResolved(true);
+      return;
+    }
     if (!token || !saved) {
       setAuthResolved(true);
       return;
@@ -41,7 +48,6 @@ function App() {
       setAuthResolved(true);
       return;
     }
-    // Validate token before showing Dashboard so we don't flash Dashboard then Login
     fetch(`${API_URL}/api/portfolio`, { headers: { Authorization: `Bearer ${token}` } })
       .then((res) => {
         if (res.ok) {

@@ -8,6 +8,15 @@ import Setting from '../models/Setting.js';
 
 const router = express.Router();
 
+function redirectToFrontend(res, frontendUrl, query) {
+  const url = query ? `${frontendUrl.replace(/\/$/, '')}${String(query).startsWith('?') ? query : `?${query}`}` : frontendUrl;
+  const html = `<!DOCTYPE html><html><head><meta charset="utf-8"><meta http-equiv="refresh" content="0;url=${url.replace(/"/g, '&quot;')}"><title>Redirecting</title><style>body{font-family:system-ui;display:flex;align-items:center;justify-content:center;min-height:100vh;margin:0;background:#0f172a;color:#e2e8f0;}a{color:#38bdf8;}</style></head><body><p>Redirecting to app… <a href="${url.replace(/"/g, '&quot;')}">Click here if not redirected</a>.</p><script>window.location.href=${JSON.stringify(url)};</script></body></html>`;
+  res.set('Location', url);
+  res.status(302);
+  res.type('html');
+  res.send(html);
+}
+
 function getKite(userId) {
   const apiKey = getKiteApiKey();
   const accessToken = getAccessToken(userId);
@@ -97,10 +106,10 @@ router.get('/callback', async (req, res) => {
   }
 
   if (!apiKey || !apiSecret) {
-    return res.redirect(`${frontendUrl}?kite_error=missing_api_secret`);
+    return redirectToFrontend(res, frontendUrl, 'kite_error=missing_api_secret');
   }
   if (!requestToken) {
-    return res.redirect(`${frontendUrl}?kite_error=missing_request_token`);
+    return redirectToFrontend(res, frontendUrl, 'kite_error=missing_request_token');
   }
 
   let stateValue = null;
@@ -128,7 +137,7 @@ router.get('/callback', async (req, res) => {
   }
   if (!stateValue) {
     if (requestToken) stateValue = 'market';
-    else return res.redirect(`${frontendUrl}?kite_error=invalid_state`);
+    else return redirectToFrontend(res, frontendUrl, 'kite_error=invalid_state');
   }
   if (redirectOriginFromState) frontendUrl = redirectOriginFromState;
 
@@ -168,13 +177,13 @@ router.get('/callback', async (req, res) => {
         setAccessToken(stateValue, accessToken);
         console.log('[kite] Access token set for user', stateValue);
       }
-      return res.redirect(`${frontendUrl}?kite_refreshed=1`);
+      return redirectToFrontend(res, frontendUrl, 'kite_refreshed=1');
     }
     const errMsg = json?.message || json?.error_type || 'Unknown error';
-    return res.redirect(`${frontendUrl}?kite_error=${encodeURIComponent(errMsg)}`);
+    return redirectToFrontend(res, frontendUrl, 'kite_error=' + encodeURIComponent(errMsg));
   } catch (err) {
     console.error('[kite] Callback error', err?.message || err);
-    return res.redirect(`${frontendUrl}?kite_error=${encodeURIComponent(err?.message || 'Request failed')}`);
+    return redirectToFrontend(res, frontendUrl, 'kite_error=' + encodeURIComponent(err?.message || 'Request failed'));
   }
 });
 
