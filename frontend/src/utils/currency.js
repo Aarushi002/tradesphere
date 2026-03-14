@@ -12,3 +12,13 @@ export function formatINR(value) {
   });
   return `₹${formatted}`;
 }
+
+/** Compact format for dashboard: 156000 -> "1.56L", 6690 -> "6.69k", 467 -> "467" */
+export function formatINRCompact(value) {
+  if (value == null || Number.isNaN(value)) return '0';
+  const num = Number(value);
+  if (num >= 1e7) return (num / 1e7).toFixed(2) + 'Cr';
+  if (num >= 1e5) return (num / 1e5).toFixed(2) + 'L';
+  if (num >= 1e3) return (num / 1e3).toFixed(2) + 'k';
+  return num.toFixed(0);
+}

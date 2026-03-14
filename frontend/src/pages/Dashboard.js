@@ -1,7 +1,6 @@
 import { useState, useEffect } from 'react';
-import { formatINR } from '../utils/currency';
+import { formatINR, formatINRCompact } from '../utils/currency';
 import PriceChart from '../components/PriceChart';
-import Logo from '../assets/only_logo.jpg';
 
 const API_URL = process.env.REACT_APP_API_URL || 'http://localhost:5000';
 
@@ -192,6 +191,7 @@ export default function Dashboard({ user, onLogout, darkMode, onToggleDarkMode }
   useEffect(() => {
     localStorage.setItem('tradesphere_trading_mode', tradingMode);
   }, [tradingMode]);
+  useEffect(() => setWatchlistPage(1), [watchlistGroups.activeId]);
   const [showRiskDisclosure, setShowRiskDisclosure] = useState(() => !sessionStorage.getItem('tradesphere_risk_ack'));
   const [watchlistOptionsOpen, setWatchlistOptionsOpen] = useState(null); // symbol key or null
   const [optionChainSymbol, setOptionChainSymbol] = useState(null);
@@ -203,6 +203,11 @@ export default function Dashboard({ user, onLogout, darkMode, onToggleDarkMode }
   const [watchlistShow, setWatchlistShow] = useState({ priceChange: true, priceChangePct: true, priceDirection: true, holdings: false, notes: false, groupColors: false });
   const [watchlistSortBy, setWatchlistSortBy] = useState('LTP'); // '%' | 'LTP' | 'A-Z' | 'EXCH'
   const [watchlistFilterOpen, setWatchlistFilterOpen] = useState(false);
+  const [sidebarOpen, setSidebarOpen] = useState(false); // mobile watchlist drawer
+  const [headerMenuOpen, setHeaderMenuOpen] = useState(false);
+  const [alertBannerDismissed, setAlertBannerDismissed] = useState(() => !!localStorage.getItem('tradesphere_alert_banner_dismissed'));
+  const [holdingsView, setHoldingsView] = useState('current'); // 'current' | 'invested' | 'pnl'
+  const [watchlistPage, setWatchlistPage] = useState(1);
   function isMarketHours() {
     const now = new Date();
     const ist = new Date(now.toLocaleString('en-US', { timeZone: 'Asia/Kolkata' }));
@@ -553,6 +558,7 @@ export default function Dashboard({ user, onLogout, darkMode, onToggleDarkMode }
     { id: 'orders', label: 'Orders' },
     { id: 'holdings', label: 'Holdings' },
     { id: 'positions', label: 'Positions' },
+    { id: 'bids', label: 'Bids' },
     { id: 'funds', label: 'Funds' },
   ];
 
@@ -573,12 +579,17 @@ export default function Dashboard({ user, onLogout, darkMode, onToggleDarkMode }
     return (qB.lastPrice ?? 0) - (qA.lastPrice ?? 0);
   });
 
+  const watchlistPageSize = 8;
+  const watchlistPageCount = Math.max(1, Math.ceil(sortedWatchlist.length / watchlistPageSize));
+  const paginatedWatchlist = sortedWatchlist.slice((watchlistPage - 1) * watchlistPageSize, watchlistPage * watchlistPageSize);
+  const userInitials = (user?.name || user?.email || 'U').split(/\s+/).map((s) => s[0]).join('').toUpperCase().slice(0, 2);
+
   return (
-    <div className={`flex h-screen flex-col ${darkMode ? 'bg-slate-900 text-slate-100' : 'bg-white text-gray-900'}`}>
+    <div className={`flex h-screen flex-col overflow-hidden min-h-0 w-full max-w-[100vw] ${darkMode ? 'bg-slate-900 text-slate-100' : 'bg-white text-gray-900'}`}>
       {/* Risk Disclosure Popup - show once per session after login */}
       {showRiskDisclosure && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
-          <div className={`max-w-lg w-full rounded-lg shadow-xl p-6 ${darkMode ? 'bg-slate-800 border border-slate-600' : 'bg-white border border-gray-200'}`}>
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4 overflow-y-auto">
+          <div className={`max-w-lg w-full rounded-lg shadow-xl p-4 sm:p-6 my-4 ${darkMode ? 'bg-slate-800 border border-slate-600' : 'bg-white border border-gray-200'}`}>
             <div className="flex items-center gap-2 mb-4">
               <span className="text-2xl">📄</span>
               <h2 className="text-lg font-semibold">Risk disclosures on derivatives</h2>
@@ -597,93 +608,132 @@ export default function Dashboard({ user, onLogout, darkMode, onToggleDarkMode }
         </div>
       )}
 
-      {/* Top Bar - Zerodha style: indices left, nav + user right */}
-      <header className={`flex items-center justify-between border-b px-4 py-2 ${darkMode ? 'border-slate-700 bg-slate-800' : 'border-gray-200 bg-white'}`}>
-        <div className="flex items-center gap-6">
-          <div className="flex items-center gap-2">
-            <div className="h-9 w-9 shrink-0 overflow-hidden rounded-lg bg-gradient-to-br from-emerald-500/20 to-sky-500/20 ring-1 ring-emerald-400/30">
-              <img src={Logo} alt="TradeSphere" className="h-full w-full object-cover" />
-            </div>
-            <h1 className="text-lg font-bold text-slate-800 dark:text-slate-100">
-              Trade<span className="text-emerald-500 dark:text-emerald-400">Sphere</span>
-            </h1>
+      {/* Mobile: backdrop when watchlist drawer is open */}
+      <div
+        role="button"
+        tabIndex={0}
+        aria-label="Close menu"
+        className={`fixed inset-0 z-30 bg-black/50 lg:hidden ${sidebarOpen ? 'block' : 'hidden'}`}
+        onClick={() => setSidebarOpen(false)}
+        onKeyDown={(e) => e.key === 'Escape' && setSidebarOpen(false)}
+      />
+
+      {/* Top Bar - Zerodha-style: indices | Default + NEW + grid | Dashboard/Orders/... | cart bell avatar user menu */}
+      <header className={`flex items-center justify-between gap-1 sm:gap-2 border-b px-2 sm:px-3 py-1.5 sm:py-2 min-h-[48px] sm:min-h-[52px] shrink-0 min-w-0 overflow-hidden ${darkMode ? 'border-slate-700 bg-slate-800' : 'border-gray-200 bg-white'}`}>
+        <div className="flex items-center gap-1 sm:gap-2 min-w-0 flex-1 overflow-hidden">
+          <button type="button" onClick={() => setSidebarOpen((o) => !o)} className="lg:hidden p-2 -ml-1 rounded hover:bg-gray-100 dark:hover:bg-slate-700 touch-manipulation flex-shrink-0" aria-label="Toggle watchlist">☰</button>
+          <div className="hidden sm:flex items-center gap-2 md:gap-3 overflow-x-auto scrollbar-hide shrink-0">
+            {(indices.length > 0 || marketLive) && (
+              <span className="text-[10px] sm:text-xs text-green-600 dark:text-green-400 font-medium shrink-0">Live</span>
+            )}
+            {(indices.length > 0 ? indices : MOCK_INDICES).map((idx) => (
+              <div key={idx.name} className="flex items-center gap-1 text-xs shrink-0 whitespace-nowrap">
+                <span className={darkMode ? 'text-slate-400' : 'text-gray-600'}>{idx.name}</span>
+                <span className={darkMode ? 'text-slate-100' : 'text-gray-900'}>{Number(idx.value).toLocaleString('en-IN', { minimumFractionDigits: 2 })}</span>
+                <span className={idx.change < 0 ? 'text-red-600 dark:text-red-400' : 'text-green-600 dark:text-green-400'}>
+                  {idx.change >= 0 ? '+' : ''}{idx.change} ({idx.changePercent}%)
+                </span>
+              </div>
+            ))}
           </div>
-          {(indices.length > 0 || marketLive) && (
-            <span className="text-xs text-green-600 dark:text-green-400 font-medium mr-2">Live</span>
-          )}
-          {(indices.length > 0 ? indices : MOCK_INDICES).map((idx) => (
-            <div key={idx.name} className="flex items-center gap-2 text-sm">
-              <span className={darkMode ? 'text-slate-300' : 'text-gray-700'}>{idx.name}</span>
-              <span className={darkMode ? 'text-slate-100' : 'text-gray-900'}>{Number(idx.value).toLocaleString('en-IN', { minimumFractionDigits: 2 })}</span>
-              <span className={idx.change < 0 ? 'text-red-500' : 'text-green-500'}>
-                {idx.change >= 0 ? '+' : ''}{idx.change} ({idx.changePercent}%)
-              </span>
-            </div>
-          ))}
+          <div className="hidden lg:flex items-center gap-0.5 shrink-0">
+            <select
+              value={watchlistGroups.activeId}
+              onChange={(e) => switchWatchlistGroup(e.target.value)}
+              className={`text-xs font-medium rounded border py-1.5 pl-2 pr-6 appearance-none cursor-pointer bg-no-repeat bg-right ${darkMode ? 'bg-slate-700 border-slate-600 text-slate-200' : 'bg-gray-50 border-gray-300 text-gray-700'}`}
+              style={{ backgroundImage: `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' fill='none' viewBox='0 0 24 24' stroke='%236b7280'%3E%3Cpath stroke-linecap='round' stroke-linejoin='round' stroke-width='2' d='M19 9l-7 7-7-7'%3E%3C/path%3E%3C/svg%3E")`, backgroundSize: '1rem' }}
+            >
+              {watchlistGroups.groups.map((g) => (
+                <option key={g.id} value={g.id}>{g.name} ({g.symbols.length}/250)</option>
+              ))}
+            </select>
+            <button type="button" onClick={addWatchlistGroup} className="text-xs font-medium text-blue-600 dark:text-blue-400 hover:underline px-2 py-1.5">NEW</button>
+            <button type="button" onClick={() => setWatchlistFilterOpen((o) => !o)} className="p-1.5 rounded hover:bg-gray-100 dark:hover:bg-slate-700" title="Layout">▦</button>
+          </div>
         </div>
-        <div className="flex items-center gap-1">
-          {NAV_ITEMS.map((item) => (
-            <button
-              key={item.id}
-              onClick={() => setMainNav(item.id)}
-              className={`px-3 py-2 text-sm font-medium rounded ${mainNav === item.id ? 'text-blue-600 dark:text-blue-400 bg-blue-50 dark:bg-blue-900/30' : darkMode ? 'text-slate-400 hover:text-slate-200 hover:bg-slate-700' : 'text-gray-600 hover:text-gray-900 hover:bg-gray-100'}`}
-            >
-              {item.label}
-            </button>
-          ))}
-          <button type="button" className="p-2 rounded hover:bg-gray-100 dark:hover:bg-slate-700" title="Cart">🛒</button>
-          <button type="button" className="p-2 rounded hover:bg-gray-100 dark:hover:bg-slate-700" title="Notifications">🔔</button>
-          <div className="flex items-center gap-2 pl-2 ml-1 border-l border-gray-200 dark:border-slate-600">
-            <span className="text-sm font-medium">{user?.tradingId || '—'}</span>
-            <button
-              type="button"
-              onClick={onToggleDarkMode}
-              className="p-1.5 rounded hover:bg-gray-100 dark:hover:bg-slate-700"
-              title={darkMode ? 'Light mode' : 'Dark mode'}
-            >
-              {darkMode ? '☀️' : '🌙'}
-            </button>
-            <button onClick={onLogout} className="text-sm text-gray-600 dark:text-slate-400 hover:underline">Log out</button>
+        <div className="flex items-center gap-0.5 sm:gap-1 shrink-0 min-w-0">
+          <div className="hidden md:flex items-center border-b-2 border-transparent" style={{ marginBottom: -1 }}>
+            {NAV_ITEMS.map((item) => (
+              <button
+                key={item.id}
+                onClick={() => setMainNav(item.id)}
+                className={`px-2 sm:px-3 py-2 text-xs sm:text-sm font-medium touch-manipulation ${mainNav === item.id ? 'text-red-600 dark:text-red-400 border-b-2 border-red-600 dark:border-red-400' : darkMode ? 'text-slate-400 hover:text-slate-200 hover:bg-slate-700' : 'text-gray-600 hover:text-gray-900 hover:bg-gray-100'}`}
+                style={mainNav === item.id ? { marginBottom: -2 } : {}}
+              >
+                {item.label}
+              </button>
+            ))}
+          </div>
+          <select aria-label="Section" className={`md:hidden block rounded border px-2 py-1.5 text-sm font-medium min-w-0 max-w-[100px] touch-manipulation ${darkMode ? 'bg-slate-700 border-slate-600 text-slate-100' : 'bg-white border-gray-300 text-gray-900'}`} value={mainNav} onChange={(e) => setMainNav(e.target.value)}>
+            {NAV_ITEMS.map((item) => (
+              <option key={item.id} value={item.id}>{item.label}</option>
+            ))}
+          </select>
+          <button type="button" className="p-2 rounded hover:bg-gray-100 dark:hover:bg-slate-700 touch-manipulation hidden sm:block" title="Cart">🛒</button>
+          <button type="button" className="p-2 rounded hover:bg-gray-100 dark:hover:bg-slate-700 touch-manipulation hidden sm:block" title="Notifications">🔔</button>
+          <div className="flex items-center gap-1 sm:gap-2 pl-1 sm:pl-2 ml-0.5 border-l border-gray-200 dark:border-slate-600 min-w-0">
+            <div className="w-7 h-7 sm:w-8 sm:h-8 rounded-full bg-pink-500 flex items-center justify-center text-white text-xs font-semibold shrink-0" title={user?.name}>{userInitials}</div>
+            <span className="text-xs sm:text-sm font-medium truncate max-w-[70px] sm:max-w-none">{user?.tradingId || '—'}</span>
+            <div className="relative">
+              <button type="button" onClick={() => setHeaderMenuOpen((o) => !o)} className="p-1.5 rounded hover:bg-gray-100 dark:hover:bg-slate-700 touch-manipulation" aria-label="Menu">⋮</button>
+              {headerMenuOpen && (
+                <>
+                  <div className="fixed inset-0 z-40" onClick={() => setHeaderMenuOpen(false)} aria-hidden="true" />
+                  <div className={`absolute right-0 top-full mt-1 z-50 py-1 rounded border shadow-lg min-w-[140px] ${darkMode ? 'bg-slate-800 border-slate-600' : 'bg-white border-gray-200'}`}>
+                    <button type="button" onClick={() => { onToggleDarkMode(); setHeaderMenuOpen(false); }} className="w-full text-left px-3 py-2 text-sm hover:bg-gray-100 dark:hover:bg-slate-700">{darkMode ? '☀️ Light mode' : '🌙 Dark mode'}</button>
+                    <button type="button" onClick={() => { onLogout(); setHeaderMenuOpen(false); }} className="w-full text-left px-3 py-2 text-sm text-red-600 dark:text-red-400 hover:bg-gray-100 dark:hover:bg-slate-700">Log out</button>
+                  </div>
+                </>
+              )}
+            </div>
           </div>
         </div>
       </header>
 
       {backendDown && (
-        <div className="bg-amber-50 dark:bg-amber-900/30 border-b border-amber-200 dark:border-amber-800 px-4 py-3 text-sm text-amber-800 dark:text-amber-200">
-          <strong>Backend not running</strong> — Buy/Sell and portfolio need the server. In a terminal: <code className="bg-amber-100 dark:bg-amber-800/50 px-1 rounded">cd backend && npm start</code> (ensure MongoDB is running).{' '}
-          <button type="button" onClick={() => fetchPortfolio()} className="ml-2 font-medium underline">Retry</button>
+        <div className="bg-amber-50 dark:bg-amber-900/30 border-b border-amber-200 dark:border-amber-800 px-3 sm:px-4 py-3 text-xs sm:text-sm text-amber-800 dark:text-amber-200">
+          <strong>Backend not running</strong> — Buy/Sell and portfolio need the server. In a terminal: <code className="bg-amber-100 dark:bg-amber-800/50 px-1 rounded break-all">cd backend && npm start</code> (ensure MongoDB is running).{' '}
+          <button type="button" onClick={() => fetchPortfolio()} className="ml-2 font-medium underline touch-manipulation">Retry</button>
         </div>
       )}
       {error && !backendDown && (
         <div className="bg-red-50 dark:bg-red-900/30 px-4 py-2 text-sm text-red-700 dark:text-red-400">{error}</div>
       )}
 
-      <div className="flex flex-1 min-h-0">
-        {/* Left Panel - Zerodha-style Watchlist */}
-        <aside className={`w-64 shrink-0 border-r flex flex-col ${darkMode ? 'border-slate-700 bg-slate-800' : 'border-gray-200 bg-gray-50'}`}>
+      <div className="flex flex-1 min-h-0 min-w-0 relative overflow-hidden">
+        {/* Left Panel - Watchlist: drawer on mobile, sidebar on lg+ */}
+        <aside
+          className={`fixed lg:relative inset-y-0 left-0 z-40 w-[280px] max-w-[85vw] lg:w-64 lg:max-w-none shrink-0 border-r flex flex-col transform transition-transform duration-200 ease-out ${sidebarOpen ? 'translate-x-0' : '-translate-x-full lg:translate-x-0'} ${darkMode ? 'border-slate-700 bg-slate-800' : 'border-gray-200 bg-gray-50'}`}
+          style={{ top: '52px', bottom: 0 }}
+        >
+          <div className="lg:hidden flex items-center justify-between px-2 py-2 border-b border-gray-200 dark:border-slate-700">
+            <span className="font-semibold text-sm">Watchlist</span>
+            <button type="button" onClick={() => setSidebarOpen(false)} className="p-2 rounded hover:bg-gray-200 dark:hover:bg-slate-700" aria-label="Close">×</button>
+          </div>
           <div className="p-2 border-b border-gray-200 dark:border-slate-700 relative">
-            <div className="flex gap-1">
+            <div className="flex gap-1 items-center">
+              <span className={`shrink-0 text-gray-400 ${darkMode ? 'text-slate-500' : ''}`} aria-hidden>🔍</span>
               <input
                 type="text"
                 placeholder="Search eg: infy bse, nifty fut, index fund, et"
-              value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
-              onFocus={() => searchSuggestions.length > 0 && setSearchSuggestionsOpen(true)}
-              onKeyDown={(e) => {
-                if (e.key === 'Enter') {
-                  e.preventDefault();
-                  if (searchSuggestions.length > 0) {
-                    const first = searchSuggestions[0];
-                    const key = first.key || `${first.exchange}:${first.tradingsymbol}`;
-                    setWatchlist((prev) => (prev.includes(key) ? prev : [...prev, key]));
-                    setSearchQuery('');
-                    setSearchSuggestions([]);
-                    setSearchSuggestionsOpen(false);
-                  } else addToWatchlist();
-                }
-              }}
-              className={`flex-1 min-w-0 rounded border px-2 py-1.5 text-sm focus:ring-1 focus:ring-blue-500 focus:outline-none ${darkMode ? 'border-slate-600 bg-slate-700 text-slate-100 placeholder-slate-400' : 'border-gray-300 bg-white text-gray-900'}`}
-            />
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                onFocus={() => searchSuggestions.length > 0 && setSearchSuggestionsOpen(true)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') {
+                    e.preventDefault();
+                    if (searchSuggestions.length > 0) {
+                      const first = searchSuggestions[0];
+                      const key = first.key || `${first.exchange}:${first.tradingsymbol}`;
+                      setWatchlist((prev) => (prev.includes(key) ? prev : [...prev, key]));
+                      setSearchQuery('');
+                      setSearchSuggestions([]);
+                      setSearchSuggestionsOpen(false);
+                    } else addToWatchlist();
+                  }
+                }}
+                className={`flex-1 min-w-0 rounded border px-2 py-1.5 text-sm focus:ring-1 focus:ring-blue-500 focus:outline-none ${darkMode ? 'border-slate-600 bg-slate-700 text-slate-100 placeholder-slate-400' : 'border-gray-300 bg-white text-gray-900'}`}
+              />
               <button type="button" onClick={() => setWatchlistFilterOpen((o) => !o)} title="Filter / Sort" className={`p-1.5 rounded border ${darkMode ? 'border-slate-600 bg-slate-700' : 'border-gray-300 bg-white'}`}>▤</button>
             </div>
             {watchlistFilterOpen && (
@@ -738,22 +788,13 @@ export default function Dashboard({ user, onLogout, darkMode, onToggleDarkMode }
             )}
             <p className="mt-1 text-xs text-gray-500 dark:text-slate-500">Ctrl+K to search</p>
           </div>
-          <div className="p-2 flex items-center justify-between gap-1">
-            <select
-              value={watchlistGroups.activeId}
-              onChange={(e) => switchWatchlistGroup(e.target.value)}
-              className={`flex-1 min-w-0 text-xs font-semibold rounded border py-1 px-1.5 ${darkMode ? 'bg-slate-700 border-slate-600 text-slate-200' : 'bg-white border-gray-300 text-gray-700'}`}
-              title="Switch watchlist group"
-            >
-              {watchlistGroups.groups.map((g) => (
-                <option key={g.id} value={g.id}>{g.name} ({g.symbols.length}/250)</option>
-              ))}
-            </select>
-            <button type="button" onClick={addWatchlistGroup} className="text-xs text-blue-600 dark:text-blue-400 hover:underline shrink-0 whitespace-nowrap">+ New group</button>
+          <div className="px-2 pt-1 flex items-center justify-between gap-1">
+            <span className="text-xs font-semibold text-gray-700 dark:text-slate-300">{activeGroup?.name ?? 'Default'} ({watchlist.length}/250)</span>
+            <button type="button" onClick={addWatchlistGroup} className="text-xs text-blue-600 dark:text-blue-400 hover:underline shrink-0">+ New group</button>
           </div>
-          <div className="px-2 text-xs font-medium text-gray-500 dark:text-slate-500">{activeGroup?.name ?? 'Default'} ({watchlist.length})</div>
+          <div className="px-2 text-[11px] font-medium text-gray-500 dark:text-slate-500 uppercase tracking-wide">{activeGroup?.name ?? 'Default'} ({watchlist.length})</div>
           <ul className="flex-1 overflow-auto min-h-0 text-sm">
-            {sortedWatchlist.map((s) => {
+            {paginatedWatchlist.map((s) => {
               const displaySymbol = s.includes(':') ? s.split(':')[1] : s;
               let quoteKey = s.includes(':') ? s.split(':')[1] : (s === 'NIFTY50' ? 'NIFTY 50' : s);
               if (quoteKey === 'NIFTYBANK') quoteKey = 'NIFTY BANK';
@@ -777,14 +818,14 @@ export default function Dashboard({ user, onLogout, darkMode, onToggleDarkMode }
                       </div>
                     </div>
                   </div>
-                  <div className="flex items-center gap-0.5 opacity-0 group-hover:opacity-100" onClick={(e) => e.stopPropagation()}>
-                    <button type="button" onClick={() => { setSymbol(s); setMainNav('dashboard'); }} className="p-1 rounded bg-green-600 text-white hover:bg-green-700" title="Buy">▲</button>
-                    <button type="button" onClick={() => { setSymbol(s); setMainNav('dashboard'); }} className="p-1 rounded bg-red-600 text-white hover:bg-red-700" title="Sell">▼</button>
-                    <button type="button" onClick={() => { setMarketDepthSymbol(s); setWatchlistOptionsOpen(null); }} className="p-1 rounded border border-gray-300 dark:border-slate-600 bg-white dark:bg-slate-700 hover:bg-gray-100 dark:hover:bg-slate-600" title="Market Depth (D)">≡</button>
-                    <button type="button" onClick={() => { setSymbol(s); setWatchlistOptionsOpen(null); setMainNav('dashboard'); }} className="p-1 rounded border border-gray-300 dark:border-slate-600 bg-white dark:bg-slate-700 hover:bg-gray-100 dark:hover:bg-slate-600" title="Chart (C)">📈</button>
-                    <button type="button" onClick={() => removeFromWatchlist(s)} className="p-1 rounded border border-gray-300 dark:border-slate-600 bg-white dark:bg-slate-700 hover:bg-red-100 dark:hover:bg-red-900/30 text-red-600" title="Delete">🗑</button>
+                  <div className="flex items-center gap-0.5 opacity-100 sm:opacity-0 sm:group-hover:opacity-100 flex-shrink-0" onClick={(e) => e.stopPropagation()}>
+                    <button type="button" onClick={() => { setSymbol(s); setMainNav('dashboard'); setSidebarOpen(false); }} className="p-1.5 sm:p-1 rounded bg-green-600 text-white hover:bg-green-700 touch-manipulation min-w-[28px]" title="Buy">▲</button>
+                    <button type="button" onClick={() => { setSymbol(s); setMainNav('dashboard'); setSidebarOpen(false); }} className="p-1.5 sm:p-1 rounded bg-red-600 text-white hover:bg-red-700 touch-manipulation min-w-[28px]" title="Sell">▼</button>
+                    <button type="button" onClick={() => { setMarketDepthSymbol(s); setWatchlistOptionsOpen(null); setSidebarOpen(false); }} className="p-1.5 sm:p-1 rounded border border-gray-300 dark:border-slate-600 bg-white dark:bg-slate-700 hover:bg-gray-100 dark:hover:bg-slate-600 touch-manipulation min-w-[28px]" title="Market Depth">≡</button>
+                    <button type="button" onClick={() => { setSymbol(s); setWatchlistOptionsOpen(null); setMainNav('dashboard'); setSidebarOpen(false); }} className="p-1.5 sm:p-1 rounded border border-gray-300 dark:border-slate-600 bg-white dark:bg-slate-700 hover:bg-gray-100 dark:hover:bg-slate-600 touch-manipulation min-w-[28px]" title="Chart">📈</button>
+                    <button type="button" onClick={() => removeFromWatchlist(s)} className="p-1.5 sm:p-1 rounded border border-gray-300 dark:border-slate-600 bg-white dark:bg-slate-700 hover:bg-red-100 dark:hover:bg-red-900/30 text-red-600 touch-manipulation min-w-[28px]" title="Delete">🗑</button>
                     <div className="relative">
-                      <button type="button" onClick={() => setWatchlistOptionsOpen(optionsOpen ? null : s)} className="p-1 rounded border border-gray-300 dark:border-slate-600 bg-white dark:bg-slate-700 hover:bg-gray-100 dark:hover:bg-slate-600" title="Options">⋮</button>
+                      <button type="button" onClick={() => setWatchlistOptionsOpen(optionsOpen ? null : s)} className="p-1.5 sm:p-1 rounded border border-gray-300 dark:border-slate-600 bg-white dark:bg-slate-700 hover:bg-gray-100 dark:hover:bg-slate-600 touch-manipulation min-w-[28px]" title="Options">⋮</button>
                       {optionsOpen && (
                         <div className={`absolute left-0 top-full mt-0.5 z-30 min-w-[160px] py-1 rounded border shadow-lg ${darkMode ? 'bg-slate-800 border-slate-600' : 'bg-white border-gray-200'}`}>
                           <button type="button" onClick={() => { setOptionChainExpiry(null); setOptionChainSymbol(s); setWatchlistOptionsOpen(null); }} className="w-full text-left px-3 py-1.5 text-xs hover:bg-gray-100 dark:hover:bg-slate-700">Option chain</button>
@@ -802,62 +843,86 @@ export default function Dashboard({ user, onLogout, darkMode, onToggleDarkMode }
               );
             })}
           </ul>
-          <div className="p-2 flex items-center gap-2 border-t border-gray-200 dark:border-slate-700">
-            <button type="button" onClick={() => addToWatchlist()} className="p-1 rounded hover:bg-gray-200 dark:hover:bg-slate-600 text-lg leading-none" title="Add">+</button>
-            <span className="text-xs text-gray-500 dark:text-slate-500">Add to watchlist above</span>
+          <div className="p-2 flex items-center justify-between gap-1 border-t border-gray-200 dark:border-slate-700">
+            <div className="flex items-center gap-0.5">
+              {Array.from({ length: Math.min(7, watchlistPageCount) }, (_, i) => i + 1).map((p) => (
+                <button key={p} type="button" onClick={() => setWatchlistPage(p)} className={`w-6 h-6 text-xs font-medium rounded ${watchlistPage === p ? 'bg-blue-600 text-white' : darkMode ? 'hover:bg-slate-600' : 'hover:bg-gray-200'}`}>{p}</button>
+              ))}
+            </div>
+            <div className="flex items-center gap-0.5">
+              <button type="button" onClick={() => setWatchlistFilterOpen((o) => !o)} className="p-1.5 rounded hover:bg-gray-200 dark:hover:bg-slate-600" title="Layout">▦</button>
+              <button type="button" onClick={() => addToWatchlist()} className="p-1.5 rounded hover:bg-gray-200 dark:hover:bg-slate-600 text-lg leading-none" title="Add">+</button>
+            </div>
           </div>
         </aside>
 
         {/* Main Panel - Zerodha-style: [Content | Order sidebar] on dashboard */}
-        <main className={`flex-1 flex flex-col min-h-0 ${mainNav === 'dashboard' ? '' : 'overflow-auto'} ${darkMode ? 'bg-slate-900' : 'bg-gray-50'}`}>
+        <main className={`flex-1 flex flex-col min-h-0 min-w-0 overflow-x-hidden ${mainNav === 'dashboard' ? '' : 'overflow-auto'} ${darkMode ? 'bg-slate-900' : 'bg-gray-50'}`}>
           {mainNav === 'dashboard' && (
-            <div className="flex flex-1 min-h-0">
+            <div className="flex flex-1 min-h-0 min-w-0 flex-col lg:flex-row overflow-hidden">
               {/* Center: scrollable content (chart + cards) */}
-              <div className="flex-1 min-h-0 overflow-auto">
-                <div className="p-4 md:p-6 space-y-4 md:space-y-6">
-                  <h2 className={`text-lg md:text-xl font-medium ${darkMode ? 'text-slate-100' : 'text-gray-900'}`}>Hi, {user?.name || 'Trader'}</h2>
+              <div className="flex-1 min-h-0 min-w-0 overflow-auto">
+                <div className="p-3 sm:p-4 md:p-6 space-y-4 md:space-y-6 min-w-0 max-w-full">
+                  {!alertBannerDismissed && (
+                    <div className="rounded-lg bg-amber-50 dark:bg-amber-900/30 border border-amber-200 dark:border-amber-800 px-3 sm:px-4 py-3 text-sm text-amber-900 dark:text-amber-100 flex items-start justify-between gap-2">
+                      <p>The advance tax filing deadline is tomorrow, March 15. Download tax statements for all your trading and investing activity from Console to file your taxes. <a href="https://console.zerodha.com" target="_blank" rel="noopener noreferrer" className="font-medium underline">Read more</a>.</p>
+                      <button type="button" onClick={() => { setAlertBannerDismissed(true); localStorage.setItem('tradesphere_alert_banner_dismissed', '1'); }} className="shrink-0 p-1 rounded hover:bg-amber-200 dark:hover:bg-amber-800" aria-label="Dismiss">×</button>
+                    </div>
+                  )}
+                  <h2 className={`text-lg sm:text-xl md:text-2xl font-semibold truncate ${darkMode ? 'text-slate-100' : 'text-gray-900'}`}>Hi, {user?.name || 'Trader'}</h2>
 
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                    <div className={`rounded-lg border p-4 ${darkMode ? 'border-slate-700 bg-slate-800' : 'border-gray-200 bg-white'}`}>
-                      <div className="flex items-center gap-2 mb-2">
-                        <span className="text-lg">🕐</span>
-                        <h3 className="font-semibold">Equity</h3>
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-3 sm:gap-4">
+                    <div className={`rounded-lg border p-4 min-w-0 overflow-hidden ${darkMode ? 'border-slate-700 bg-slate-800' : 'border-gray-200 bg-white'}`}>
+                      <div className="flex items-center gap-2 mb-1">
+                        <span className="text-lg shrink-0" aria-hidden>🕐</span>
+                        <h3 className="font-semibold text-gray-900 dark:text-slate-100">Equity</h3>
                       </div>
-                      <p className="text-2xl font-bold">{portfolio ? formatINR(portfolio.user?.cashBalance) : '—'}</p>
-                      <p className="text-sm text-gray-500 dark:text-slate-400 mt-1">Margins used 0</p>
-                      <p className="text-sm text-gray-500 dark:text-slate-400">Opening balance {portfolio ? formatINR(portfolio.user?.cashBalance) : '—'}</p>
+                      <p className="text-2xl sm:text-3xl font-bold text-gray-900 dark:text-slate-100">{portfolio ? formatINRCompact(portfolio.user?.cashBalance ?? 0) : '—'}</p>
+                      <p className="text-xs text-gray-500 dark:text-slate-400">Margin available</p>
+                      <p className="text-xs text-gray-500 dark:text-slate-400 mt-2">Margins used 0</p>
+                      <p className="text-xs text-gray-500 dark:text-slate-400">Opening balance {portfolio ? formatINRCompact(portfolio.user?.cashBalance ?? 0) : '—'}</p>
                       <button type="button" className="text-sm text-blue-600 dark:text-blue-400 mt-2 hover:underline">View statement</button>
                     </div>
-                    <div className={`rounded-lg border p-4 ${darkMode ? 'border-slate-700 bg-slate-800' : 'border-gray-200 bg-white'}`}>
-                      <div className="flex items-center gap-2 mb-2">
-                        <span className="text-lg">●</span>
-                        <h3 className="font-semibold">Commodity</h3>
+                    <div className={`rounded-lg border p-4 min-w-0 overflow-hidden ${darkMode ? 'border-slate-700 bg-slate-800' : 'border-gray-200 bg-white'}`}>
+                      <div className="flex items-center gap-2 mb-1">
+                        <span className="text-lg shrink-0" aria-hidden>📊</span>
+                        <h3 className="font-semibold text-gray-900 dark:text-slate-100">Commodity</h3>
                       </div>
-                      <p className="text-2xl font-bold">₹0</p>
-                      <p className="text-sm text-gray-500 dark:text-slate-400 mt-1">Margins used 0</p>
-                      <p className="text-sm text-gray-500 dark:text-slate-400">Opening balance 0</p>
+                      <p className="text-2xl sm:text-3xl font-bold text-gray-900 dark:text-slate-100">0</p>
+                      <p className="text-xs text-gray-500 dark:text-slate-400">Margin available</p>
+                      <p className="text-xs text-gray-500 dark:text-slate-400 mt-2">Margins used 0</p>
+                      <p className="text-xs text-gray-500 dark:text-slate-400">Opening balance 0</p>
                       <button type="button" className="text-sm text-blue-600 dark:text-blue-400 mt-2 hover:underline">View statement</button>
                     </div>
                   </div>
 
-                  <div className={`rounded-lg border p-4 ${darkMode ? 'border-slate-700 bg-slate-800' : 'border-gray-200 bg-white'}`}>
-                    <h3 className="font-semibold mb-2">Holdings ({portfolio?.holdings?.length || 0})</h3>
+                  <div className={`rounded-lg border p-4 min-w-0 overflow-hidden ${darkMode ? 'border-slate-700 bg-slate-800' : 'border-gray-200 bg-white'}`}>
+                    <h3 className="font-semibold text-gray-900 dark:text-slate-100 mb-3">Holdings ({portfolio?.holdings?.length || 0})</h3>
                     {portfolio?.holdings?.length ? (
                       <>
-                        <div className="flex items-center gap-4 flex-wrap">
-                          <span className={totalUnrealizedPnl >= 0 ? 'text-green-500' : 'text-red-500'}>
-                            {formatINR(totalUnrealizedPnl)} ({portfolio?.holdings?.length ? ((totalUnrealizedPnl / (portfolio.holdings.reduce((s, h) => s + (h.value || 0), 0)) || 0) * 100).toFixed(2) : 0}%)
-                          </span>
-                          <span className="text-sm text-gray-500 dark:text-slate-400">Current value {formatINR(portfolio?.holdings?.reduce((s, h) => s + (h.value || 0), 0) || 0)}</span>
-                          <span className="text-sm text-gray-500 dark:text-slate-400">Investment {formatINR(portfolio?.holdings?.reduce((s, h) => s + h.quantity * h.avgBuyPrice, 0) || 0)}</span>
+                        <div className="flex flex-wrap items-start gap-4">
+                          <div>
+                            <p className={`text-2xl sm:text-3xl font-bold ${totalUnrealizedPnl >= 0 ? 'text-green-600 dark:text-green-400' : 'text-red-600 dark:text-red-400'}`}>
+                              {Math.round(totalUnrealizedPnl)}
+                            </p>
+                            <p className="text-xs text-gray-500 dark:text-slate-400">P&L</p>
+                            <p className={`text-sm font-medium ${totalUnrealizedPnl >= 0 ? 'text-green-600 dark:text-green-400' : 'text-red-600 dark:text-red-400'}`}>
+                              {portfolio?.holdings?.length ? ((totalUnrealizedPnl / (portfolio.holdings.reduce((s, h) => s + (h.value || 0), 0)) || 0) * 100).toFixed(2) : 0}%
+                            </p>
+                          </div>
+                          <div className="text-sm text-gray-600 dark:text-slate-300">
+                            <p>Current value {formatINR(portfolio?.holdings?.reduce((s, h) => s + (h.value || 0), 0) || 0)}</p>
+                            <p>Investment {formatINR(portfolio?.holdings?.reduce((s, h) => s + h.quantity * h.avgBuyPrice, 0) || 0)}</p>
+                          </div>
                         </div>
-                        <div className="mt-2 h-2 bg-gray-200 dark:bg-slate-600 rounded-full overflow-hidden flex">
-                          <div className="h-full bg-green-500" style={{ width: portfolio?.portfolioValue && portfolio.portfolioValue > 0 ? Math.min(100, Math.max(0, 100 * (portfolio.holdings?.reduce((s, h) => s + (h.value || 0), 0) || 0) / portfolio.portfolioValue)) : 50 }} />
+                        <div className="mt-3 h-2 bg-gray-200 dark:bg-slate-600 rounded-full overflow-hidden flex">
+                          <div className="h-full bg-blue-600 dark:bg-blue-500" style={{ width: portfolio?.portfolioValue && portfolio.portfolioValue > 0 ? Math.min(100, Math.max(0, 100 * (portfolio.holdings?.reduce((s, h) => s + (h.value || 0), 0) || 0) / portfolio.portfolioValue)) : 50 }} />
                         </div>
-                        <div className="mt-2 flex gap-4 text-sm">
-                          <label className="flex items-center gap-1"><input type="radio" name="holdingsView" defaultChecked /> Current value</label>
-                          <label className="flex items-center gap-1"><input type="radio" name="holdingsView" /> Invested</label>
-                          <label className="flex items-center gap-1"><input type="radio" name="holdingsView" /> P&L</label>
+                        <p className="mt-2 text-lg font-semibold text-gray-900 dark:text-slate-100">{holdingsView === 'current' && formatINR(portfolio?.holdings?.reduce((s, h) => s + (h.value || 0), 0) || 0)}{holdingsView === 'invested' && formatINR(portfolio?.holdings?.reduce((s, h) => s + h.quantity * h.avgBuyPrice, 0) || 0)}{holdingsView === 'pnl' && formatINR(totalUnrealizedPnl)}</p>
+                        <div className="mt-2 flex flex-wrap gap-4 text-sm">
+                          <label className="flex items-center gap-1.5 cursor-pointer"><input type="radio" name="holdingsView" checked={holdingsView === 'current'} onChange={() => setHoldingsView('current')} /> Current value</label>
+                          <label className="flex items-center gap-1.5 cursor-pointer"><input type="radio" name="holdingsView" checked={holdingsView === 'invested'} onChange={() => setHoldingsView('invested')} /> Invested</label>
+                          <label className="flex items-center gap-1.5 cursor-pointer"><input type="radio" name="holdingsView" checked={holdingsView === 'pnl'} onChange={() => setHoldingsView('pnl')} /> P&L</label>
                         </div>
                       </>
                     ) : (
@@ -865,82 +930,95 @@ export default function Dashboard({ user, onLogout, darkMode, onToggleDarkMode }
                     )}
                   </div>
 
-                  <div className={`rounded-lg border p-4 ${darkMode ? 'border-slate-700 bg-slate-800' : 'border-gray-200 bg-white'}`}>
-                    <div className="flex flex-wrap items-center justify-between gap-2 mb-2">
-                      <h3 className="font-semibold">{symbol.includes(':') ? symbol.split(':')[1] : symbol}</h3>
-                      <div className="flex flex-wrap gap-1">
-                        {[
-                          { id: '1d', label: '1D' },
-                          { id: '6d', label: '6D' },
-                          { id: '14d', label: '14D' },
-                          { id: '1m', label: '1M' },
-                          { id: '3m', label: '3M' },
-                          { id: '52w', label: '52W' },
-                          { id: 'ytd', label: 'YTD' },
-                        ].map(({ id, label }) => (
-                          <button
-                            key={id}
-                            type="button"
-                            onClick={() => setChartRange(id)}
-                            className={`px-2 py-1 text-xs font-medium rounded ${chartRange === id
-                              ? darkMode ? 'bg-emerald-600 text-white' : 'bg-emerald-600 text-white'
-                              : darkMode ? 'bg-slate-700 text-slate-300 hover:bg-slate-600' : 'bg-gray-200 text-gray-700 hover:bg-gray-300'
-                            }`}
-                          >
-                            {label}
-                          </button>
-                        ))}
+                  <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 min-w-0">
+                    <div className="lg:col-span-2 min-w-0">
+                      <div className={`rounded-lg border p-4 min-w-0 overflow-hidden h-full flex flex-col ${darkMode ? 'border-slate-700 bg-slate-800' : 'border-gray-200 bg-white'}`}>
+                        <div className="flex items-center gap-2 mb-2">
+                          <span className="text-lg text-gray-500 dark:text-slate-400" aria-hidden>📈</span>
+                          <h3 className="font-semibold text-gray-900 dark:text-slate-100">Market overview</h3>
+                        </div>
+                        <div className="flex flex-wrap items-center justify-between gap-2 mb-2 min-w-0">
+                          <span className="text-sm font-medium text-gray-600 dark:text-slate-400 truncate">{symbol.includes(':') ? symbol.split(':')[1] : symbol}</span>
+                          <div className="flex flex-wrap gap-1">
+                            {[
+                              { id: '1d', label: '1D' },
+                              { id: '6d', label: '6D' },
+                              { id: '14d', label: '14D' },
+                              { id: '1m', label: '1M' },
+                              { id: '3m', label: '3M' },
+                              { id: '52w', label: '52W' },
+                              { id: 'ytd', label: 'YTD' },
+                            ].map(({ id, label }) => (
+                              <button
+                                key={id}
+                                type="button"
+                                onClick={() => setChartRange(id)}
+                                className={`px-2 py-1 text-xs font-medium rounded ${chartRange === id
+                                  ? 'bg-blue-600 text-white'
+                                  : darkMode ? 'bg-slate-700 text-slate-300 hover:bg-slate-600' : 'bg-gray-200 text-gray-700 hover:bg-gray-300'
+                                }`}
+                              >
+                                {label}
+                              </button>
+                            ))}
+                          </div>
+                        </div>
+                        <div className="h-[260px] md:h-[320px] rounded bg-gray-100 dark:bg-slate-900 relative flex-1 min-h-0">
+                          {chartLoading && (
+                            <div className="absolute inset-0 flex items-center justify-center bg-gray-100/80 dark:bg-slate-900/80 z-10 rounded">
+                              <span className="text-sm text-gray-600 dark:text-slate-400">Loading chart…</span>
+                            </div>
+                          )}
+                          <PriceChart data={candles} />
+                        </div>
+                        {chartError && <p className="text-xs text-amber-600 dark:text-amber-400 mt-1">{chartError}</p>}
                       </div>
                     </div>
-                    <div className="h-[260px] md:h-[320px] rounded bg-gray-100 dark:bg-slate-900 relative">
-                      {chartLoading && (
-                        <div className="absolute inset-0 flex items-center justify-center bg-gray-100/80 dark:bg-slate-900/80 z-10 rounded">
-                          <span className="text-sm text-gray-600 dark:text-slate-400">Loading chart…</span>
-                        </div>
-                      )}
-                      <PriceChart data={candles} />
+                    <div className={`rounded-lg border p-6 min-w-0 flex flex-col items-center justify-center text-center min-h-[260px] lg:min-h-0 ${darkMode ? 'border-slate-700 bg-slate-800' : 'border-gray-200 bg-gray-50'}`}>
+                      <span className="text-4xl text-gray-300 dark:text-slate-600 mb-2" aria-hidden>⚓</span>
+                      <p className="text-sm font-medium text-gray-700 dark:text-slate-300">You don&apos;t have any positions yet</p>
+                      <button type="button" onClick={() => setMainNav('dashboard')} className="mt-3 px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white text-sm font-medium rounded touch-manipulation">Get started</button>
                     </div>
-                    {chartError && <p className="text-xs text-amber-600 dark:text-amber-400 mt-1">{chartError}</p>}
                   </div>
                 </div>
               </div>
 
-              {/* Right sidebar - Zerodha-style order panel (fixed width, same height as content) */}
+              {/* Right sidebar - Order panel: full width below chart on mobile, sidebar on lg+ */}
               {(() => {
                 const [ex, trSymbol] = symbol.includes(':') ? symbol.split(':') : ['NSE', symbol];
                 const isNfo = ex === 'NFO';
                 const isOpt = /(CE|PE)$/.test(String(trSymbol).toUpperCase());
                 const optionsRequireLimit = isNfo && isOpt;
                 return (
-                  <aside className={`w-72 shrink-0 flex flex-col border-l ${darkMode ? 'border-slate-700 bg-slate-800' : 'border-gray-200 bg-white'}`}>
-                    <div className="p-3 border-b border-gray-200 dark:border-slate-700">
-                      <div className="flex items-center justify-between gap-2">
-                        <h3 className="text-sm font-semibold text-gray-900 dark:text-slate-100">Order</h3>
-                        <span className={`text-[10px] font-medium px-1.5 py-0.5 rounded ${tradingMode === 'paper' ? 'bg-amber-100 text-amber-800 dark:bg-amber-900/40 dark:text-amber-200' : 'bg-emerald-100 text-emerald-800 dark:bg-emerald-900/40 dark:text-emerald-200'}`}>{tradingMode === 'paper' ? 'Paper' : 'Live'}</span>
+                  <aside className={`w-full lg:w-72 shrink-0 flex flex-col border-t lg:border-t-0 border-l min-w-0 overflow-hidden ${darkMode ? 'border-slate-700 bg-slate-800' : 'border-gray-200 bg-white'}`}>
+                    <div className="p-3 border-b border-gray-200 dark:border-slate-700 min-w-0">
+                      <div className="flex items-center justify-between gap-2 min-w-0">
+                        <h3 className="text-sm font-semibold text-gray-900 dark:text-slate-100 shrink-0">Order</h3>
+                        <span className={`text-[10px] font-medium px-1.5 py-0.5 rounded shrink-0 ${tradingMode === 'paper' ? 'bg-amber-100 text-amber-800 dark:bg-amber-900/40 dark:text-amber-200' : 'bg-emerald-100 text-emerald-800 dark:bg-emerald-900/40 dark:text-emerald-200'}`}>{tradingMode === 'paper' ? 'Paper' : 'Live'}</span>
                       </div>
-                      <p className="text-xs text-gray-500 dark:text-slate-400 mt-0.5">{tradingMode === 'paper' ? 'Simulated on TradeSphere' : 'Scrip from watchlist or search'}</p>
+                      <p className="text-xs text-gray-500 dark:text-slate-400 mt-0.5 truncate" title={tradingMode === 'paper' ? 'Simulated on TradeSphere' : 'Scrip from watchlist or search'}>{tradingMode === 'paper' ? 'Simulated on TradeSphere' : 'Scrip from watchlist or search'}</p>
                     </div>
-                    <div className="p-3 flex flex-col gap-3 flex-1 min-h-0">
-                      <div>
+                    <div className="p-3 flex flex-col gap-3 flex-1 min-h-0 min-w-0">
+                      <div className="min-w-0">
                         <label className="block text-xs font-medium text-gray-500 dark:text-slate-400 mb-1">Symbol</label>
-                        <input placeholder="e.g. RELIANCE or NFO:NIFTY24MARFUT" value={symbol} onChange={(e) => setSymbol(e.target.value)} className={`w-full rounded border px-2.5 py-2 text-sm ${darkMode ? 'border-slate-600 bg-slate-700 text-slate-100 placeholder-slate-400' : 'border-gray-300 bg-white text-gray-900 placeholder-gray-400'}`} />
+                        <input placeholder="e.g. RELIANCE" value={symbol} onChange={(e) => setSymbol(e.target.value)} className={`w-full min-w-0 rounded border px-2.5 py-2.5 sm:py-2 text-sm touch-manipulation box-border ${darkMode ? 'border-slate-600 bg-slate-700 text-slate-100 placeholder-slate-400' : 'border-gray-300 bg-white text-gray-900 placeholder-gray-400'}`} />
                       </div>
-                      <div>
+                      <div className="min-w-0">
                         <label className="block text-xs font-medium text-gray-500 dark:text-slate-400 mb-1">Quantity</label>
-                        <input type="number" placeholder="0" value={quantity} onChange={(e) => setQuantity(e.target.value)} min={1} className={`w-full rounded border px-2.5 py-2 text-sm ${darkMode ? 'border-slate-600 bg-slate-700 text-slate-100' : 'border-gray-300 bg-white text-gray-900'}`} />
+                        <input type="number" placeholder="0" value={quantity} onChange={(e) => setQuantity(e.target.value)} min={1} className={`w-full min-w-0 rounded border px-2.5 py-2.5 sm:py-2 text-sm touch-manipulation box-border ${darkMode ? 'border-slate-600 bg-slate-700 text-slate-100' : 'border-gray-300 bg-white text-gray-900'}`} />
                       </div>
                       {optionsRequireLimit && <p className="text-xs text-amber-600 dark:text-amber-400">Options: LIMIT order & price required</p>}
-                      <div className="grid grid-cols-2 gap-2">
-                        <div>
+                      <div className="grid grid-cols-2 gap-2 min-w-0">
+                        <div className="min-w-0">
                           <label className="block text-xs font-medium text-gray-500 dark:text-slate-400 mb-1">Type</label>
-                          <select value={orderType} onChange={(e) => setOrderType(e.target.value)} disabled={optionsRequireLimit} className={`w-full rounded border px-2 py-2 text-sm ${darkMode ? 'border-slate-600 bg-slate-700 text-slate-100' : 'border-gray-300 bg-white text-gray-900'}`}>
+                          <select value={orderType} onChange={(e) => setOrderType(e.target.value)} disabled={optionsRequireLimit} className={`w-full min-w-0 rounded border px-2 py-2 text-sm box-border ${darkMode ? 'border-slate-600 bg-slate-700 text-slate-100' : 'border-gray-300 bg-white text-gray-900'}`}>
                             <option value="MARKET">Market</option>
                             <option value="LIMIT">Limit</option>
                           </select>
                         </div>
-                        <div>
+                        <div className="min-w-0">
                           <label className="block text-xs font-medium text-gray-500 dark:text-slate-400 mb-1">Product</label>
-                          <select value={orderProduct} onChange={(e) => setOrderProduct(e.target.value)} className={`w-full rounded border px-2 py-2 text-sm ${darkMode ? 'border-slate-600 bg-slate-700 text-slate-100' : 'border-gray-300 bg-white text-gray-900'}`}>
+                          <select value={orderProduct} onChange={(e) => setOrderProduct(e.target.value)} className={`w-full min-w-0 rounded border px-2 py-2 text-sm box-border ${darkMode ? 'border-slate-600 bg-slate-700 text-slate-100' : 'border-gray-300 bg-white text-gray-900'}`}>
                             {isNfo ? (<><option value="MIS">MIS</option><option value="NRML">NRML</option></>) : (<><option value="CNC">CNC</option><option value="MIS">MIS</option><option value="NRML">NRML</option></>)}
                           </select>
                         </div>
@@ -951,11 +1029,11 @@ export default function Dashboard({ user, onLogout, darkMode, onToggleDarkMode }
                           <input type="number" step="0.05" placeholder="0.00" value={orderPrice} onChange={(e) => setOrderPrice(e.target.value)} className={`w-full rounded border px-2.5 py-2 text-sm ${darkMode ? 'border-slate-600 bg-slate-700 text-slate-100' : 'border-gray-300 bg-white text-gray-900'}`} />
                         </div>
                       )}
-                      <div className="grid grid-cols-2 gap-2 mt-auto pt-2">
-                        <button type="button" onClick={() => placeOrder('BUY')} disabled={kiteOrderLoading || (optionsRequireLimit && !orderPrice)} className="rounded py-2.5 text-sm font-medium text-white bg-green-600 hover:bg-green-700 disabled:opacity-50 disabled:cursor-not-allowed">Buy</button>
-                        <button type="button" onClick={() => placeOrder('SELL')} disabled={kiteOrderLoading || (optionsRequireLimit && !orderPrice)} className="rounded py-2.5 text-sm font-medium text-white bg-red-600 hover:bg-red-700 disabled:opacity-50 disabled:cursor-not-allowed">Sell</button>
+                      <div className="grid grid-cols-2 gap-2 mt-auto pt-2 min-w-0">
+                        <button type="button" onClick={() => placeOrder('BUY')} disabled={kiteOrderLoading || (optionsRequireLimit && !orderPrice)} className="rounded py-3 sm:py-2.5 text-sm font-medium text-white bg-green-600 hover:bg-green-700 disabled:opacity-50 disabled:cursor-not-allowed touch-manipulation min-h-[44px] sm:min-h-0 min-w-0">Buy</button>
+                        <button type="button" onClick={() => placeOrder('SELL')} disabled={kiteOrderLoading || (optionsRequireLimit && !orderPrice)} className="rounded py-3 sm:py-2.5 text-sm font-medium text-white bg-red-600 hover:bg-red-700 disabled:opacity-50 disabled:cursor-not-allowed touch-manipulation min-h-[44px] sm:min-h-0 min-w-0">Sell</button>
                       </div>
-                      <p className="text-[10px] text-gray-400 dark:text-slate-500">Kite · F&O: MIS/NRML · Options: Limit</p>
+                      <p className="text-[10px] text-gray-400 dark:text-slate-500 break-words overflow-hidden">Kite · F&O: MIS/NRML · Options: Limit</p>
                     </div>
                   </aside>
                 );
@@ -964,11 +1042,11 @@ export default function Dashboard({ user, onLogout, darkMode, onToggleDarkMode }
           )}
 
           {mainNav === 'orders' && (
-            <div className="p-6">
+            <div className="p-3 sm:p-6 overflow-auto">
               <div className={`rounded-lg border overflow-hidden ${darkMode ? 'border-slate-700 bg-slate-800' : 'border-gray-200 bg-white'}`}>
-                <h3 className="px-4 py-3 font-semibold border-b border-gray-200 dark:border-slate-700">Orders</h3>
-                <div className="overflow-auto max-h-96 p-4">
-                  <table className="w-full text-left text-sm">
+                <h3 className="px-3 sm:px-4 py-3 font-semibold border-b border-gray-200 dark:border-slate-700">Orders</h3>
+                <div className="overflow-x-auto max-h-96 p-3 sm:p-4">
+                  <table className="w-full text-left text-sm min-w-[500px]">
                     <thead>
                       <tr className="border-b border-gray-200 dark:border-slate-600 text-gray-600 dark:text-slate-400">
                         <th className="pb-2 pr-4">Time</th>
@@ -1002,12 +1080,12 @@ export default function Dashboard({ user, onLogout, darkMode, onToggleDarkMode }
           )}
 
           {mainNav === 'holdings' && (
-            <div className="p-6">
+            <div className="p-3 sm:p-6 overflow-auto">
               <div className={`rounded-lg border overflow-hidden ${darkMode ? 'border-slate-700 bg-slate-800' : 'border-gray-200 bg-white'}`}>
-                <h3 className="px-4 py-3 font-semibold border-b border-gray-200 dark:border-slate-700">Holdings</h3>
-                <div className="p-4">
+                <h3 className="px-3 sm:px-4 py-3 font-semibold border-b border-gray-200 dark:border-slate-700">Holdings</h3>
+                <div className="p-3 sm:p-4 overflow-x-auto">
                   {portfolio?.holdings?.length ? (
-                    <table className="w-full text-left text-sm">
+                    <table className="w-full text-left text-sm min-w-[400px]">
                       <thead>
                         <tr className="border-b border-gray-200 dark:border-slate-600 text-gray-600 dark:text-slate-400">
                           <th className="pb-2 pr-4">Stock</th>
@@ -1038,12 +1116,12 @@ export default function Dashboard({ user, onLogout, darkMode, onToggleDarkMode }
           )}
 
           {mainNav === 'positions' && (
-            <div className="p-6">
+            <div className="p-3 sm:p-6 overflow-auto">
               <div className={`rounded-lg border overflow-hidden ${darkMode ? 'border-slate-700 bg-slate-800' : 'border-gray-200 bg-white'}`}>
-                <h3 className="px-4 py-3 font-semibold border-b border-gray-200 dark:border-slate-700">Positions {kitePositions.length > 0 && <span className="text-xs font-normal text-green-600 dark:text-green-400">(Live from Kite)</span>}</h3>
-                <div className="p-4">
+                <h3 className="px-3 sm:px-4 py-3 font-semibold border-b border-gray-200 dark:border-slate-700">Positions {kitePositions.length > 0 && <span className="text-xs font-normal text-green-600 dark:text-green-400">(Live from Kite)</span>}</h3>
+                <div className="p-3 sm:p-4 overflow-x-auto">
                   {kitePositions.length > 0 ? (
-                    <table className="w-full text-left text-sm">
+                    <table className="w-full text-left text-sm min-w-[400px]">
                       <thead>
                         <tr className="border-b border-gray-200 dark:border-slate-600 text-gray-600 dark:text-slate-400">
                           <th className="pb-2 pr-4">Symbol</th>
@@ -1066,7 +1144,7 @@ export default function Dashboard({ user, onLogout, darkMode, onToggleDarkMode }
                       </tbody>
                     </table>
                   ) : portfolio?.holdings?.length ? (
-                    <table className="w-full text-left text-sm">
+                    <table className="w-full text-left text-sm min-w-[320px]">
                       <thead>
                         <tr className="border-b border-gray-200 dark:border-slate-600 text-gray-600 dark:text-slate-400">
                           <th className="pb-2 pr-4">Symbol</th>
@@ -1094,8 +1172,20 @@ export default function Dashboard({ user, onLogout, darkMode, onToggleDarkMode }
             </div>
           )}
 
+          {mainNav === 'bids' && (
+            <div className="p-3 sm:p-6 overflow-auto">
+              <div className={`rounded-lg border overflow-hidden ${darkMode ? 'border-slate-700 bg-slate-800' : 'border-gray-200 bg-white'}`}>
+                <h3 className="px-4 py-3 font-semibold border-b border-gray-200 dark:border-slate-700">Bids</h3>
+                <div className="p-6 text-center text-gray-500 dark:text-slate-400">
+                  <p className="text-sm">IPO and SGB bids will appear here.</p>
+                  <p className="text-xs mt-1">Place bids from Console or the app when an issue is open.</p>
+                </div>
+              </div>
+            </div>
+          )}
+
           {mainNav === 'funds' && (
-            <div className="p-6 space-y-6">
+            <div className="p-3 sm:p-6 space-y-4 sm:space-y-6 overflow-auto">
               <div className={`rounded-lg border p-4 ${darkMode ? 'border-slate-700 bg-slate-800' : 'border-gray-200 bg-white'}`}>
                 <h3 className="font-semibold mb-4">Funds & margin</h3>
                 {kiteMargins && (kiteMargins.equity || kiteMargins.available) ? (
@@ -1149,9 +1239,9 @@ export default function Dashboard({ user, onLogout, darkMode, onToggleDarkMode }
 
               <div className={`rounded-lg border overflow-hidden ${darkMode ? 'border-slate-700 bg-slate-800' : 'border-gray-200 bg-white'}`}>
                 <h3 className="px-4 py-3 font-semibold border-b border-gray-200 dark:border-slate-700">Mutual fund holdings</h3>
-                <div className="p-4">
+                <div className="p-3 sm:p-4 overflow-x-auto">
                   {mfHoldings.length > 0 ? (
-                    <table className="w-full text-left text-sm">
+                    <table className="w-full text-left text-sm min-w-[360px]">
                       <thead>
                         <tr className="border-b border-gray-200 dark:border-slate-600 text-gray-600 dark:text-slate-400">
                           <th className="pb-2 pr-4">Fund</th>
@@ -1179,9 +1269,9 @@ export default function Dashboard({ user, onLogout, darkMode, onToggleDarkMode }
 
               <div className={`rounded-lg border overflow-hidden ${darkMode ? 'border-slate-700 bg-slate-800' : 'border-gray-200 bg-white'}`}>
                 <h3 className="px-4 py-3 font-semibold border-b border-gray-200 dark:border-slate-700">MF orders (last 7 days)</h3>
-                <div className="p-4 max-h-48 overflow-auto">
+                <div className="p-3 sm:p-4 max-h-48 overflow-auto overflow-x-auto">
                   {mfOrders.length > 0 ? (
-                    <table className="w-full text-left text-sm">
+                    <table className="w-full text-left text-sm min-w-[360px]">
                       <thead>
                         <tr className="border-b border-gray-200 dark:border-slate-600 text-gray-600 dark:text-slate-400">
                           <th className="pb-2 pr-4">Fund</th>
@@ -1216,13 +1306,13 @@ export default function Dashboard({ user, onLogout, darkMode, onToggleDarkMode }
 
       {/* Option Chain modal */}
       {optionChainSymbol && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4" onClick={() => { setOptionChainSymbol(null); setOptionChainExpiry(null); setOptionChainData(null); }}>
-          <div className={`max-w-4xl w-full max-h-[90vh] overflow-auto rounded-lg shadow-xl ${darkMode ? 'bg-slate-800 border border-slate-600' : 'bg-white border border-gray-200'}`} onClick={(e) => e.stopPropagation()}>
-            <div className="sticky top-0 flex items-center justify-between p-4 border-b border-gray-200 dark:border-slate-700 bg-inherit">
-              <h2 className="text-lg font-semibold">Option chain — {optionChainSymbol.includes(':') ? optionChainSymbol.split(':')[1] : optionChainSymbol}</h2>
-              <button type="button" onClick={() => { setOptionChainSymbol(null); setOptionChainExpiry(null); setOptionChainData(null); }} className="p-2 rounded hover:bg-gray-100 dark:hover:bg-slate-700">×</button>
+        <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-black/50 p-0 sm:p-4 overflow-y-auto" onClick={() => { setOptionChainSymbol(null); setOptionChainExpiry(null); setOptionChainData(null); }}>
+          <div className={`max-w-4xl w-full max-h-[95vh] sm:max-h-[90vh] overflow-auto rounded-t-xl sm:rounded-lg shadow-xl flex flex-col ${darkMode ? 'bg-slate-800 border border-slate-600' : 'bg-white border border-gray-200'}`} onClick={(e) => e.stopPropagation()}>
+            <div className="sticky top-0 flex items-center justify-between p-3 sm:p-4 border-b border-gray-200 dark:border-slate-700 bg-inherit shrink-0">
+              <h2 className="text-base sm:text-lg font-semibold truncate pr-2">Option chain — {optionChainSymbol.includes(':') ? optionChainSymbol.split(':')[1] : optionChainSymbol}</h2>
+              <button type="button" onClick={() => { setOptionChainSymbol(null); setOptionChainExpiry(null); setOptionChainData(null); }} className="p-2 rounded hover:bg-gray-100 dark:hover:bg-slate-700 touch-manipulation shrink-0">×</button>
             </div>
-            <div className="p-4">
+            <div className="p-3 sm:p-4 overflow-x-auto">
               {optionChainLoading ? (
                 <div className="py-12 text-center text-gray-500 dark:text-slate-400">Loading option chain…</div>
               ) : optionChainData?.error ? (
@@ -1243,8 +1333,8 @@ export default function Dashboard({ user, onLogout, darkMode, onToggleDarkMode }
                     <span className="ml-2 text-xs text-gray-500 self-center">OI</span>
                     <button type="button" className="px-2 py-1 text-xs rounded border border-gray-300 dark:border-slate-600">Greeks</button>
                   </div>
-                  <div className="overflow-x-auto">
-                    <table className="w-full text-sm">
+                  <div className="overflow-x-auto -mx-3 sm:mx-0">
+                    <table className="w-full text-xs sm:text-sm min-w-[360px]">
                       <thead>
                         <tr className="border-b border-gray-200 dark:border-slate-600">
                           <th className="text-left py-2 pr-2">Call OI (L)</th>
@@ -1288,13 +1378,13 @@ export default function Dashboard({ user, onLogout, darkMode, onToggleDarkMode }
 
       {/* Market Depth modal */}
       {marketDepthSymbol && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4" onClick={() => setMarketDepthSymbol(null)}>
-          <div className={`max-w-2xl w-full max-h-[90vh] overflow-auto rounded-lg shadow-xl ${darkMode ? 'bg-slate-800 border border-slate-600' : 'bg-white border border-gray-200'}`} onClick={(e) => e.stopPropagation()}>
-            <div className="sticky top-0 flex items-center justify-between p-4 border-b border-gray-200 dark:border-slate-700 bg-inherit">
-              <h2 className="text-lg font-semibold">Market depth — {marketDepthSymbol.includes(':') ? marketDepthSymbol.split(':')[1] : marketDepthSymbol}</h2>
-              <button type="button" onClick={() => setMarketDepthSymbol(null)} className="p-2 rounded hover:bg-gray-100 dark:hover:bg-slate-700">×</button>
+        <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-black/50 p-0 sm:p-4 overflow-y-auto" onClick={() => setMarketDepthSymbol(null)}>
+          <div className={`max-w-2xl w-full max-h-[95vh] sm:max-h-[90vh] overflow-auto rounded-t-xl sm:rounded-lg shadow-xl ${darkMode ? 'bg-slate-800 border border-slate-600' : 'bg-white border border-gray-200'}`} onClick={(e) => e.stopPropagation()}>
+            <div className="sticky top-0 flex items-center justify-between p-3 sm:p-4 border-b border-gray-200 dark:border-slate-700 bg-inherit">
+              <h2 className="text-base sm:text-lg font-semibold truncate pr-2">Market depth — {marketDepthSymbol.includes(':') ? marketDepthSymbol.split(':')[1] : marketDepthSymbol}</h2>
+              <button type="button" onClick={() => setMarketDepthSymbol(null)} className="p-2 rounded hover:bg-gray-100 dark:hover:bg-slate-700 touch-manipulation">×</button>
             </div>
-            <div className="p-4">
+            <div className="p-3 sm:p-4 overflow-x-auto">
               <table className="w-full text-sm">
                 <thead>
                   <tr className="border-b border-gray-200 dark:border-slate-600 text-gray-600 dark:text-slate-400">
@@ -1322,9 +1412,9 @@ export default function Dashboard({ user, onLogout, darkMode, onToggleDarkMode }
       )}
 
       {/* Collapsible Feed (optional) - keep for social */}
-      <details className="border-t border-gray-200 dark:border-slate-700 bg-white dark:bg-slate-800">
-        <summary className="cursor-pointer px-4 py-2 text-sm font-medium text-gray-700 dark:text-slate-300 hover:bg-gray-50 dark:hover:bg-slate-700">Feed</summary>
-        <div className="max-h-64 overflow-auto border-t border-gray-100 dark:border-slate-700 p-4">
+      <details className="border-t border-gray-200 dark:border-slate-700 bg-white dark:bg-slate-800 shrink-0">
+        <summary className="cursor-pointer px-3 sm:px-4 py-2 text-sm font-medium text-gray-700 dark:text-slate-300 hover:bg-gray-50 dark:hover:bg-slate-700 touch-manipulation">Feed</summary>
+        <div className="max-h-64 overflow-auto border-t border-gray-100 dark:border-slate-700 p-3 sm:p-4">
           <form onSubmit={handleCreatePost} className="mb-4">
             <textarea
               placeholder="Share a thought or strategy..."

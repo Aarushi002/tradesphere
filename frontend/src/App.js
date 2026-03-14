@@ -47,7 +47,7 @@ function App() {
   }
 
   return (
-    <div className="App min-h-screen bg-gray-100 dark:bg-slate-900 text-gray-900 dark:text-slate-100">
+    <div className="App min-h-screen min-h-[100dvh] bg-gray-100 dark:bg-slate-900 text-gray-900 dark:text-slate-100 overflow-x-hidden">
       {user ? (
         <Dashboard user={user} onLogout={handleLogout} darkMode={darkMode} onToggleDarkMode={() => setDarkMode((d) => !d)} />
       ) : (

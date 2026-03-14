@@ -130,7 +130,7 @@ export default function Login({ onLogin }) {
   }
 
   return (
-    <div className="relative min-h-screen min-h-[100dvh] flex flex-col lg:flex-row items-stretch justify-between bg-slate-950 overflow-x-hidden overflow-y-auto">
+    <div className="relative min-h-screen min-h-[100dvh] flex flex-col lg:flex-row items-stretch justify-between bg-slate-950 overflow-x-hidden overflow-y-auto touch-manipulation">
       {/* Animated candlestick background */}
       <div className="candles-bg">
         {bottomCandles.map((candle, idx) => (

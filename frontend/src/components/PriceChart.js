@@ -10,10 +10,11 @@ const PriceChart = ({ data }) => {
   useEffect(() => {
     if (!chartContainerRef.current) return;
 
-    // Create chart instance
-    chartRef.current = LightweightCharts.createChart(chartContainerRef.current, {
-      width: chartContainerRef.current.clientWidth,
-      height: 400,
+    const el = chartContainerRef.current;
+    // Create chart instance (use container dimensions for responsive height)
+    chartRef.current = LightweightCharts.createChart(el, {
+      width: el.clientWidth,
+      height: el.clientHeight || 300,
       layout: {
         background: { color: '#111827' },
         textColor: '#e5e7eb',
@@ -46,8 +47,10 @@ const PriceChart = ({ data }) => {
     // Resize chart on container resize
     const handleResize = () => {
       if (chartRef.current && chartContainerRef.current) {
+        const c = chartContainerRef.current;
         chartRef.current.applyOptions({
-          width: chartContainerRef.current.clientWidth,
+          width: c.clientWidth,
+          height: c.clientHeight || 300,
         });
       }
     };
@@ -79,7 +82,7 @@ const PriceChart = ({ data }) => {
   return (
     <div
       ref={chartContainerRef}
-      style={{ width: '100%', height: '400px' }}
+      className="w-full h-full min-h-[200px]"
     />
   );
 };
