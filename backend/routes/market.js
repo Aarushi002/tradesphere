@@ -330,21 +330,24 @@ router.get('/quotes', async (req, res) => {
     for (let i = 0; i < keys.length; i++) {
       const key = keys[i];
       const name = keyToName[key] || normalizeKiteKeyToName(key);
-      const q = quoteList[i] || quoteList.find((r) => r && toYahooSymbol(key) === r.symbol);
+      const yahooSym = toYahooSymbol(key);
+      const q = quoteList[i] || quoteList.find((r) => r && (r.symbol === yahooSym || r.shortName === name));
       if (!q || q.regularMarketPrice == null) continue;
       const lastPrice = Number(q.regularMarketPrice);
-      // Prefer Yahoo's change fields when present (avoids +0 when prev close equals price)
-      let netChange = q.regularMarketChange != null ? Number(q.regularMarketChange) : null;
-      let changePercent = q.regularMarketChangePercent != null ? Number(q.regularMarketChangePercent) : null;
+      // Prefer Yahoo's change fields; try multiple possible names (Yahoo API can vary)
+      let netChange = [q.regularMarketChange, q.marketChange].find((v) => v != null) != null
+        ? Number(q.regularMarketChange ?? q.marketChange) : null;
+      let changePercent = [q.regularMarketChangePercent, q.marketChangePercent].find((v) => v != null) != null
+        ? Number(q.regularMarketChangePercent ?? q.marketChangePercent) : null;
       if (netChange == null || changePercent == null) {
-        const prevClose = Number(q.regularMarketPreviousClose ?? q.previousClose ?? lastPrice);
-        if (Number.isFinite(prevClose)) {
+        const prevClose = Number(q.regularMarketPreviousClose ?? q.previousClose ?? q.regularMarketOpen ?? lastPrice);
+        if (Number.isFinite(prevClose) && prevClose !== 0) {
           if (netChange == null) netChange = lastPrice - prevClose;
-          if (changePercent == null && prevClose !== 0) changePercent = (netChange / prevClose) * 100;
+          if (changePercent == null) changePercent = (netChange / prevClose) * 100;
         }
       }
       if (changePercent == null) changePercent = 0;
-      // Yahoo may return regularMarketChangePercent as decimal (e.g. -0.31 for -0.31%) or as percent
+      // Yahoo may return changePercent as decimal (e.g. -0.31 for -0.31%)
       if (changePercent !== 0 && Math.abs(changePercent) < 1.5) changePercent = changePercent * 100;
       data.push({
         name,
