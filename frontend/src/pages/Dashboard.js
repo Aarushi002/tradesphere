@@ -303,12 +303,16 @@ export default function Dashboard({ user, onLogout, darkMode, onToggleDarkMode }
     if (ltp != null) setOrderPrice(String(ltp));
   }, [orderModalOpen, symbol, quotes]);
 
+  const PORTFOLIO_TIMEOUT_MS = 10000; // 10s – avoid stuck "Loading..." when backend is slow/unreachable
+
   function fetchPortfolio() {
     const token = getToken();
     if (!token) return;
     setLoading(true);
     setError('');
-    fetch(`${API_URL}/api/portfolio`, { headers: { Authorization: `Bearer ${token}` } })
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), PORTFOLIO_TIMEOUT_MS);
+    fetch(`${API_URL}/api/portfolio`, { headers: { Authorization: `Bearer ${token}` }, signal: controller.signal })
       .then((res) => {
         if (!res.ok) throw new Error('Server error');
         return res.json();
@@ -319,9 +323,15 @@ export default function Dashboard({ user, onLogout, darkMode, onToggleDarkMode }
       })
       .catch((err) => {
         setBackendDown(true);
-        setError(err.message === 'Failed to fetch' ? 'Cannot reach backend. Start it to trade.' : err.message);
+        const msg = err.name === 'AbortError'
+          ? 'Connection timed out. Check backend URL and try again.'
+          : (err.message === 'Failed to fetch' ? 'Cannot reach backend. Start it to trade.' : err.message);
+        setError(msg);
       })
-      .finally(() => setLoading(false));
+      .finally(() => {
+        clearTimeout(timeoutId);
+        setLoading(false);
+      });
   }
 
   useEffect(() => {
