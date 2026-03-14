@@ -1235,7 +1235,7 @@ export default function Dashboard({ user, onLogout, darkMode, onToggleDarkMode }
                     {(optionChainData?.expiries || []).map((exp) => {
                       const d = exp.slice(0, 10);
                       const active = (optionChainData?.selectedExpiry || '').slice(0, 10) === d || optionChainExpiry === d;
-                      const label = d ? (() => { const [y, m, day] = d.split('-'); const months = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec']; return `${day} ${months[Number(m) - 1]}`; })() : exp;
+                      const label = d ? (() => { const [, m, day] = d.split('-'); const months = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec']; return `${day} ${months[Number(m) - 1]}`; })() : exp;
                       return (
                         <button key={exp} type="button" onClick={() => setOptionChainExpiry(d)} className={`px-3 py-1.5 rounded border text-sm ${active ? 'bg-blue-600 text-white border-blue-600' : darkMode ? 'border-slate-600 hover:bg-slate-700' : 'border-gray-300 hover:bg-gray-100'}`}>{label}</button>
                       );
