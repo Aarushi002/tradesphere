@@ -163,6 +163,8 @@ export default function Dashboard({ user, onLogout, darkMode, onToggleDarkMode }
   const [quotesFromLiveApi, setQuotesFromLiveApi] = useState(false); // true when last successful quotes response had real data
   const [quotesApiUnavailable, setQuotesApiUnavailable] = useState(false); // true when backend returns 503 (Kite not configured)
   const [kiteRefreshMessage, setKiteRefreshMessage] = useState(null); // 'success' | error string after redirect from Kite callback
+  const [kiteAutoConnecting, setKiteAutoConnecting] = useState(false); // true when redirecting to Kite to enable live data (no manual "Connect Kite" step)
+  const kiteRedirectDoneRef = useRef(false);
   const [searchSuggestions, setSearchSuggestions] = useState([]);
   const [searchSuggestionsTotal, setSearchSuggestionsTotal] = useState(0);
   const [searchSuggestionsOpen, setSearchSuggestionsOpen] = useState(false);
@@ -391,6 +393,7 @@ export default function Dashboard({ user, onLogout, darkMode, onToggleDarkMode }
     if (refreshed === '1') {
       setKiteRefreshMessage('success');
       setQuotesApiUnavailable(false);
+      kiteRedirectDoneRef.current = false; // allow future auto-redirect if token is lost
       window.history.replaceState({}, '', window.location.pathname);
       const t = setTimeout(() => setKiteRefreshMessage(null), 5000);
       return () => clearTimeout(t);
@@ -399,6 +402,21 @@ export default function Dashboard({ user, onLogout, darkMode, onToggleDarkMode }
       setKiteRefreshMessage(decodeURIComponent(err));
       window.history.replaceState({}, '', window.location.pathname);
     }
+  }, []);
+
+  // Auto-connect Kite for live data when user is logged in and app has no market token (no manual "Connect Kite" step)
+  useEffect(() => {
+    if (!getToken() || kiteRedirectDoneRef.current) return;
+    fetch(`${API_URL}/api/kite/status`)
+      .then((res) => res.ok ? res.json() : Promise.reject())
+      .then((data) => {
+        if (data.configured && !data.hasSession) {
+          kiteRedirectDoneRef.current = true;
+          setKiteAutoConnecting(true);
+          window.location.href = `${API_URL}/api/kite/login?for=market`;
+        }
+      })
+      .catch(() => {});
   }, []);
 
   useEffect(() => {
@@ -698,8 +716,8 @@ export default function Dashboard({ user, onLogout, darkMode, onToggleDarkMode }
             {quotesFromLiveApi && (
               <span className="text-[10px] sm:text-xs text-green-600 dark:text-green-400 font-medium shrink-0" title="Real-time data from Kite">Live</span>
             )}
-            {quotesApiUnavailable && (
-              <span className="text-[10px] sm:text-xs text-amber-600 dark:text-amber-400 shrink-0" title="Administrator: connect Kite once for live data">Connect Kite</span>
+            {quotesApiUnavailable && !kiteAutoConnecting && (
+              <span className="text-[10px] sm:text-xs text-amber-600 dark:text-amber-400 shrink-0" title="Live data is being set up">Enabling…</span>
             )}
             {indices.length > 0 ? indices.map((idx) => (
               <div key={idx.name} className="flex items-center gap-1 text-xs shrink-0 whitespace-nowrap">
@@ -709,8 +727,8 @@ export default function Dashboard({ user, onLogout, darkMode, onToggleDarkMode }
                   {idx.change >= 0 ? '+' : ''}{idx.change} ({idx.changePercent}%)
                 </span>
               </div>
-            )) : quotesApiUnavailable ? (
-              <span className="text-xs text-amber-600 dark:text-amber-400 shrink-0">Connect Kite for live indices</span>
+            )) : quotesApiUnavailable && !kiteAutoConnecting ? (
+              <span className="text-xs text-amber-600 dark:text-amber-400 shrink-0">Enabling live indices…</span>
             ) : null}
         </div>
           <div className="hidden lg:flex items-center gap-0.5 shrink-0">
@@ -951,11 +969,18 @@ export default function Dashboard({ user, onLogout, darkMode, onToggleDarkMode }
           Kite login failed: {kiteRefreshMessage}
         </div>
       )}
-      {quotesApiUnavailable && !backendDown && (
+      {kiteAutoConnecting && (
         <div className="bg-sky-50 dark:bg-sky-900/20 border-b border-sky-200 dark:border-sky-800 px-3 sm:px-4 py-2 text-xs sm:text-sm text-sky-800 dark:text-sky-200">
-          <strong>Paper trading</strong> — Real-time prices for practice. Administrator: connect Kite once so everyone gets live data (no per-user linking).{' '}
-          <a href={`${API_URL}/api/kite/login`} className="font-semibold underline hover:no-underline">Connect Kite for market data</a>
-          . In Zerodha Kite app set redirect URL to <code className="bg-sky-100 dark:bg-sky-800/50 px-1 rounded break-all">{API_URL}/api/kite/callback</code>
+          Enabling live data…
+        </div>
+      )}
+      {quotesApiUnavailable && !backendDown && !kiteAutoConnecting && (
+        <div className="bg-sky-50 dark:bg-sky-900/20 border-b border-sky-200 dark:border-sky-800 px-3 sm:px-4 py-2 text-xs sm:text-sm text-sky-800 dark:text-sky-200">
+          <strong>Paper trading</strong> — Live prices for practice. {kiteRefreshMessage ? (
+            <>Kite login failed. <a href={`${API_URL}/api/kite/login?for=market`} className="font-semibold underline hover:no-underline">Try again</a></>
+          ) : (
+            <>Enabling live data…</>
+          )}
         </div>
       )}
       {error && !backendDown && (
@@ -1095,7 +1120,7 @@ export default function Dashboard({ user, onLogout, darkMode, onToggleDarkMode }
           <div className="px-2 flex items-center justify-between gap-1">
             <span className="text-[11px] font-medium text-gray-500 dark:text-slate-500 uppercase tracking-wide">{activeGroup?.name ?? 'Default'} ({watchlist.length})</span>
             {quotesFromLiveApi && <span className="text-[10px] text-green-600 dark:text-green-400 font-medium">Live</span>}
-            {quotesApiUnavailable && <span className="text-[10px] text-amber-600 dark:text-amber-400">Connect Kite</span>}
+            {quotesApiUnavailable && !kiteAutoConnecting && <span className="text-[10px] text-amber-600 dark:text-amber-400">Enabling…</span>}
           </div>
           <ul className="flex-1 overflow-auto min-h-0 text-sm">
             {paginatedWatchlist.map((s) => {

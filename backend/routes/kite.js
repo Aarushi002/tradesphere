@@ -4,6 +4,7 @@ import { KiteConnect } from 'kiteconnect';
 import { auth } from '../middleware/auth.js';
 import { optionalAuth } from '../middleware/auth.js';
 import { getAccessToken, setAccessToken, getMarketDataToken, setMarketDataToken } from '../src/lib/kiteToken.js';
+import Setting from '../models/Setting.js';
 
 const router = express.Router();
 
@@ -35,12 +36,16 @@ function requireKite(req, res, next) {
   next();
 }
 
-// GET /api/kite/login - No auth: state=market (app-level market data for paper trading). With auth: state=userId (per-user for real broker).
+// GET /api/kite/login - No auth: state=market (app-level market data). ?for=market forces state=market so one login enables live data for everyone.
 router.get('/login', optionalAuth, (req, res) => {
   if (!apiKey) {
-    return res.status(503).json({ error: 'Set KITE_API_KEY in backend .env' });
+    return res.status(503).json({
+      error: 'Set KITE_API_KEY in backend .env',
+      hint: 'Local: ensure backend/.env exists and contains KITE_API_KEY=your_key. Production: set KITE_API_KEY in your host\'s environment variables (e.g. Vercel → Project → Settings → Environment Variables).',
+    });
   }
-  const statePlain = req.userId ? String(req.userId) : 'market';
+  const forMarket = (req.query.for || '').toString().toLowerCase() === 'market';
+  const statePlain = forMarket ? 'market' : (req.userId ? String(req.userId) : 'market');
   const stateB64 = Buffer.from(statePlain, 'utf8').toString('base64').replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
   const url = `https://kite.zerodha.com/connect/login?v=3&api_key=${encodeURIComponent(apiKey)}&state=${encodeURIComponent(stateB64)}`;
   res.redirect(302, url);
@@ -92,6 +97,15 @@ router.get('/callback', async (req, res) => {
     if (accessToken) {
       if (stateValue === 'market') {
         setMarketDataToken(accessToken);
+        try {
+          await Setting.findOneAndUpdate(
+            { key: 'kite_market_token' },
+            { key: 'kite_market_token', value: accessToken },
+            { upsert: true }
+          );
+        } catch (e) {
+          console.error('[kite] Failed to persist market token to DB', e?.message);
+        }
         console.log('[kite] Market data token set (app-level). All users will see real-time data.');
       } else {
         setAccessToken(stateValue, accessToken);

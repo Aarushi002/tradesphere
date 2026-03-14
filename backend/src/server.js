@@ -39,6 +39,19 @@ async function start() {
     await mongoose.connect(MONGO_URI);
     console.log('MongoDB connected');
 
+    // Restore Kite market data token from DB so live data survives restarts (e.g. on Render)
+    try {
+      const Setting = (await import('../models/Setting.js')).default;
+      const doc = await Setting.findOne({ key: 'kite_market_token' });
+      if (doc && doc.value) {
+        const { setMarketDataToken } = await import('./lib/kiteToken.js');
+        setMarketDataToken(doc.value);
+        console.log('[kite] Restored market data token from DB');
+      }
+    } catch (e) {
+      // ignore if Setting model or token missing
+    }
+
     app.listen(PORT, () => {
       console.log(`Server running on port ${PORT}`);
     });

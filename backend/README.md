@@ -42,13 +42,14 @@ For live candles and real-time prices you need Zerodha Kite API.
 
 ### One-time setup
 
-1. Add to `.env`:
+1. Add to `backend/.env` (local) or set the same variables in your **hosting environment** (e.g. Vercel → Project → Settings → Environment Variables):
    ```env
    KITE_API_KEY=your_kite_api_key
    KITE_API_SECRET=your_kite_api_secret
    KITE_ACCESS_TOKEN=your_access_token
    FRONTEND_URL=http://localhost:3000
    ```
+   **If you see "Set KITE_API_KEY in backend .env"**: locally, ensure the backend is started from the `backend` folder so `backend/.env` is loaded; in production, add `KITE_API_KEY` and `KITE_API_SECRET` in your host's env vars.
 2. In [Kite developer console](https://developers.kite.trade/), set your app’s **Redirect URL** to:
    - Local: `http://localhost:5000/api/kite/callback`
    - Production: `https://your-backend-domain.com/api/kite/callback`
