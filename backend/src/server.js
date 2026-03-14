@@ -10,7 +10,7 @@ import stocksRoutes from '../routes/stocks.js';
 import leaderboardRoutes from '../routes/leaderboard.js';
 import socialRoutes from '../routes/social.js';
 import marketRoutes from '../routes/market.js';
-import kiteRoutes from '../routes/kite.js';
+import kiteRoutes, { handleKiteCallback } from '../routes/kite.js';
 
 const app = express();
 
@@ -22,6 +22,9 @@ app.get('/api/health', (req, res) => {
   res.json({ status: 'ok', service: 'tradesphere-backend' });
 });
 
+// Register Kite callback on the main app first so it always matches (avoids 404 on Render etc.)
+app.get('/api/kite/callback', handleKiteCallback);
+
 app.use('/api/auth', authRoutes);
 app.use('/api/trades', tradesRoutes);
 app.use('/api/portfolio', portfolioRoutes);
@@ -31,15 +34,7 @@ app.use('/api/social', socialRoutes);
 app.use('/api/market', marketRoutes);
 app.use('/api/kite', kiteRoutes);
 
-// Fallback: if GET /api/kite/callback wasn't handled (e.g. 404 on some hosts), redirect to frontend instead of showing "Not Found"
 app.use((req, res) => {
-  if (req.method === 'GET' && req.path === '/api/kite/callback') {
-    const frontend = process.env.FRONTEND_URL || process.env.KITE_FRONTEND_URL || 'https://tradesphere-six.vercel.app';
-    const q = req.url && req.url.includes('?') ? req.url.slice(req.url.indexOf('?')) : '';
-    const hasToken = q && /request_token=/.test(q);
-    const redirectUrl = hasToken ? `${frontend}?kite_refreshed=1` : `${frontend}?kite_error=callback_not_available`;
-    return res.redirect(302, redirectUrl);
-  }
   res.status(404).send('Not Found');
 });
 

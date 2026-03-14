@@ -92,14 +92,13 @@ router.get('/login', optionalAuth, (req, res) => {
   res.redirect(302, url);
 });
 
-// GET /api/kite/callback - state=market → set global market data token; else state=userId → set per-user token. state can be "market|https://origin" to redirect there.
-router.get('/callback', async (req, res) => {
+// Shared handler so server.js can register GET /api/kite/callback directly (avoids 404 on some hosts)
+export async function handleKiteCallback(req, res) {
   const requestToken = (req.query.request_token || '').toString().trim();
   const stateRaw = (req.query.state || '').toString().trim();
   const apiKey = getKiteApiKey();
   const apiSecret = getKiteApiSecret();
   let frontendUrl = getFrontendUrl();
-  // When callback runs on production (e.g. Render), never redirect to localhost — use env even if getFrontendUrl() fell back to localhost
   const requestHost = (req.get('host') || req.hostname || '').toLowerCase();
   if (requestHost && !requestHost.includes('localhost') && frontendUrl && frontendUrl.includes('localhost')) {
     frontendUrl = process.env.FRONTEND_URL || process.env.KITE_FRONTEND_URL || frontendUrl;
@@ -185,7 +184,9 @@ router.get('/callback', async (req, res) => {
     console.error('[kite] Callback error', err?.message || err);
     return redirectToFrontend(res, frontendUrl, 'kite_error=' + encodeURIComponent(err?.message || 'Request failed'));
   }
-});
+}
+
+router.get('/callback', handleKiteCallback);
 
 // GET /api/kite/status - Market data: no auth, returns whether app has Kite connected for real-time data
 router.get('/status', (req, res) => {
