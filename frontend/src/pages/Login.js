@@ -10,39 +10,65 @@ export default function Login({ onLogin }) {
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
-  const [heroLine1, setHeroLine1] = useState('');
+  const [heroLine1a, setHeroLine1a] = useState('');
+  const [heroLine1b, setHeroLine1b] = useState('');
+  const [heroLine1c, setHeroLine1c] = useState('');
   const [heroLine2, setHeroLine2] = useState('');
 
   useEffect(() => {
-    const full1 = 'TradeSphere by GammaFlowCapital';
-    const full2 = 'Your Strategy Lab for the Stock Market';
+    const line1a = 'TradeSphere';
+    const line1b = 'by';
+    const line1c = 'GammaFlowCapital';
+    const line2 = 'Your Strategy Lab for the Stock Market';
 
-    let idx1 = 0;
+    let idx1a = 0;
+    let idx1b = 0;
+    let idx1c = 0;
     let idx2 = 0;
-    let phase = 'line1';
+    let phase = 'line1a';
     let timer;
 
     const tick = () => {
-      if (phase === 'line1') {
-        if (idx1 <= full1.length) {
-          setHeroLine1(full1.slice(0, idx1));
-          idx1 += 1;
+      if (phase === 'line1a') {
+        if (idx1a <= line1a.length) {
+          setHeroLine1a(line1a.slice(0, idx1a));
+          idx1a += 1;
+        } else {
+          phase = 'line1b';
+          idx1b = 0;
+        }
+      } else if (phase === 'line1b') {
+        if (idx1b <= line1b.length) {
+          setHeroLine1b(line1b.slice(0, idx1b));
+          idx1b += 1;
+        } else {
+          phase = 'line1c';
+          idx1c = 0;
+        }
+      } else if (phase === 'line1c') {
+        if (idx1c <= line1c.length) {
+          setHeroLine1c(line1c.slice(0, idx1c));
+          idx1c += 1;
         } else {
           phase = 'line2';
           idx2 = 0;
         }
       } else if (phase === 'line2') {
-        if (idx2 <= full2.length) {
-          setHeroLine2(full2.slice(0, idx2));
+        if (idx2 <= line2.length) {
+          setHeroLine2(line2.slice(0, idx2));
           idx2 += 1;
         } else {
           phase = 'pause';
           setTimeout(() => {
-            idx1 = 0;
+            idx1a = 0;
+            idx1b = 0;
+            idx1c = 0;
             idx2 = 0;
-            setHeroLine1('');
+            setHeroLine1a('');
+            setHeroLine1b('');
+            setHeroLine1c('');
             setHeroLine2('');
-            phase = 'line1';
+            phase = 'line1a';
           }, 5000);
         }
       }
@@ -130,7 +156,7 @@ export default function Login({ onLogin }) {
   }
 
   return (
-    <div className="relative min-h-screen min-h-[100dvh] flex flex-col lg:flex-row items-stretch justify-between bg-slate-950 overflow-x-hidden overflow-y-auto touch-manipulation">
+    <div className="relative min-h-screen min-h-[100dvh] lg:h-screen lg:min-h-0 flex flex-col lg:flex-row items-stretch bg-slate-950 overflow-x-hidden overflow-y-auto touch-manipulation">
       {/* Animated candlestick background */}
       <div className="candles-bg">
         {bottomCandles.map((candle, idx) => (
@@ -164,34 +190,42 @@ export default function Login({ onLogin }) {
           />
         ))}
       </div>
-      {/* Sticky top-left: logo + TradeSphere — full width, no left gap */}
-      <div className="sticky top-0 left-0 right-0 z-20 flex items-center gap-3 pl-4 pr-4 py-3 sm:pl-6 sm:pr-6 md:pl-10 md:pr-10 lg:pl-16 lg:pr-6 lg:py-4 bg-slate-950/90 backdrop-blur-md border-b border-slate-800/50 lg:absolute lg:right-auto lg:top-0 lg:left-0 lg:border-0 lg:bg-transparent lg:backdrop-blur-none w-full lg:w-auto shrink-0">
-        <div className="relative h-12 w-12 sm:h-14 sm:w-14 md:h-16 md:w-16 shrink-0 overflow-hidden rounded-xl md:rounded-2xl bg-gradient-to-br from-emerald-500/25 via-emerald-400/20 to-sky-500/15 shadow-[0_0_40px_rgba(16,185,129,0.6)] ring-1 ring-emerald-400/40 mt-3">
-          <img
-            src={Logo}
-            alt="TradeSphere"
-            className="absolute inset-0 h-full w-full object-cover mix-blend-screen opacity-90"
-          />
+      {/* Left half: logo + heading — full 50% of screen */}
+      <div className="relative z-10 flex flex-col w-full lg:w-1/2 lg:min-w-0 lg:shrink-0 lg:h-screen lg:min-h-0">
+        {/* Sticky top bar: logo + TradeSphere (mobile/tablet) */}
+        <div className="sticky top-0 left-0 right-0 z-20 flex items-center gap-3 pl-4 pr-4 py-3 sm:pl-6 sm:pr-6 md:pl-10 lg:pl-12 xl:pl-16 lg:py-4 bg-slate-950/90 backdrop-blur-md border-b border-slate-800/50 lg:border-0 lg:bg-transparent lg:backdrop-blur-none shrink-0">
+          <div className="relative h-12 w-12 sm:h-14 sm:w-14 md:h-16 md:w-16 shrink-0 overflow-hidden rounded-xl md:rounded-2xl bg-gradient-to-br from-emerald-500/25 via-emerald-400/20 to-sky-500/15 shadow-[0_0_40px_rgba(16,185,129,0.6)] ring-1 ring-emerald-400/40 mt-3">
+            <img
+              src={Logo}
+              alt="TradeSphere"
+              className="absolute inset-0 h-full w-full object-cover mix-blend-screen opacity-90"
+            />
+          </div>
+          <p className="text-base sm:text-lg md:text-xl font-semibold text-slate-100 -mt-4">
+            Trade<span className="text-emerald-400">Sphere</span>
+          </p>
         </div>
-        <p className="text-base sm:text-lg md:text-xl font-semibold text-slate-100 -mt-4">
-          Trade<span className="text-emerald-400">Sphere</span>
-        </p>
-      </div>
-      {/* Left hero area - visible on tablet/mobile above form, side-by-side on desktop */}
-      <div className="relative z-10 flex flex-1 flex-col justify-center min-w-0 pl-8 pr-4 sm:pl-12 sm:pr-6 md:pl-16 md:pr-10 lg:pl-12 lg:pr-8 xl:pl-16 xl:pr-12 lg:max-w-[55%] text-slate-50 pt-2 pb-6 sm:pt-2 sm:pb-8 lg:pt-0 lg:pb-0 -mt-4 lg:mt-0">
-        <div className="max-w-xl w-full">
-          <p className="text-2xl sm:text-3xl md:text-4xl lg:text-5xl xl:text-6xl font-bold tracking-tight text-slate-50 mb-3 sm:mb-4 leading-tight">
-            {heroLine1}
+        {/* Hero heading — four lines with space between each */}
+        <div className="flex flex-1 flex-col justify-start min-h-0 pl-8 pr-4 sm:pl-12 sm:pr-6 md:pl-16 lg:pl-12 xl:pl-16 text-slate-50 pt-4 pb-6 sm:pt-6 sm:pb-8 lg:pt-16 xl:pt-24 lg:pb-12 -mt-4 lg:mt-0">
+          <p className="text-2xl sm:text-3xl md:text-4xl lg:text-4xl xl:text-5xl font-bold tracking-tight text-slate-50 mb-8 sm:mb-10">
+            <><span className="text-red-400">{heroLine1a.slice(0, 5)}</span><span className="text-emerald-400">{heroLine1a.slice(5)}</span></>
+          </p>
+          <p className="text-2xl sm:text-3xl md:text-4xl lg:text-4xl xl:text-5xl font-bold tracking-tight text-slate-50 mb-8 sm:mb-10">
+            {heroLine1b}
+          </p>
+          <p className="text-2xl sm:text-3xl md:text-4xl lg:text-4xl xl:text-5xl font-bold tracking-tight text-slate-50 mb-8 sm:mb-10">
+            {heroLine1c}
             <span className="inline-block w-1.5 h-6 sm:h-8 xl:h-10 align-middle bg-emerald-400/90 animate-pulse ml-1" />
           </p>
-          <p className="text-base sm:text-lg md:text-xl lg:text-2xl xl:text-3xl text-slate-300/95 font-medium">
+          <p className="text-base sm:text-lg md:text-xl lg:text-xl xl:text-2xl text-slate-300/95 font-medium">
             {heroLine2}
           </p>
         </div>
       </div>
-      {/* Right side: login card */}
-      <div className="relative z-10 w-full flex-shrink-0 lg:w-[420px] xl:w-[460px] flex items-center justify-center px-4 sm:px-6 md:px-10 lg:px-0 lg:mr-6 xl:mr-10 py-6 sm:py-8 lg:py-12 pb-10 sm:pb-12">
-        <div className="w-full max-w-md mx-auto min-h-0 flex flex-col justify-center rounded-2xl border border-slate-800/80 bg-slate-950/85 backdrop-blur-xl p-6 sm:p-8 xl:p-10 shadow-[0_22px_55px_rgba(0,0,0,0.7)]">
+      {/* Right half: login segment fills entire half with visible divide */}
+      <div className="relative z-10 w-full lg:w-1/2 lg:min-w-0 lg:h-screen lg:min-h-0 flex flex-col lg:border-l border-slate-700/80 bg-slate-900/40 lg:bg-slate-900/50">
+        <div className="flex-1 min-h-0 flex flex-col justify-center w-full px-4 sm:px-6 md:px-10 lg:px-10 xl:px-16 py-6 sm:py-8 lg:py-12 rounded-2xl lg:rounded-none border border-slate-800/80 lg:border-0 bg-slate-950/85 lg:bg-transparent backdrop-blur-xl lg:backdrop-blur-none shadow-[0_22px_55px_rgba(0,0,0,0.7)] lg:shadow-none max-w-md lg:max-w-none mx-auto lg:mx-0">
+          <div className="w-full lg:max-w-md xl:max-w-lg mx-auto">
           <h2 className="text-base sm:text-lg font-semibold text-slate-100 mb-4 text-center">
             {isRegister ? 'Create your account' : 'Log in to your account'}
           </h2>
@@ -244,6 +278,7 @@ export default function Login({ onLogin }) {
             {isRegister ? 'Log in' : 'Sign up'}
           </button>
         </p>
+          </div>
         </div>
       </div>
     </div>
