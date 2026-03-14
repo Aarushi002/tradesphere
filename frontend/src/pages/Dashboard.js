@@ -165,7 +165,8 @@ export default function Dashboard({ user, onLogout, darkMode, onToggleDarkMode }
   const [kiteRefreshMessage, setKiteRefreshMessage] = useState(null); // 'success' | error string after redirect from Kite callback
   const [kiteAutoConnecting, setKiteAutoConnecting] = useState(false); // true when redirecting to Kite to enable live data (no manual "Connect Kite" step)
   const [kiteSetupOpen, setKiteSetupOpen] = useState(false); // one-time setup: paste API key/secret, no env vars needed
-  const [kiteRedirectUrl, setKiteRedirectUrl] = useState(''); // URL to add in Kite developer console
+  const [kiteRedirectUrl, setKiteRedirectUrl] = useState(''); // URL to add in Kite developer console (fallback: API_URL + /api/kite/callback)
+  const kiteRedirectUrlDisplay = kiteRedirectUrl || `${API_URL.replace(/\/$/, '')}/api/kite/callback`;
   const [kiteSetupApiKey, setKiteSetupApiKey] = useState('');
   const [kiteSetupApiSecret, setKiteSetupApiSecret] = useState('');
   const [kiteSetupSaving, setKiteSetupSaving] = useState(false);
@@ -1002,8 +1003,8 @@ export default function Dashboard({ user, onLogout, darkMode, onToggleDarkMode }
                 <span className="text-xs font-semibold text-gray-700 dark:text-slate-300">Step 1 — Add redirect URL</span>
                 <p className="text-xs text-gray-500 dark:text-slate-400 mt-0.5 mb-1">Open Kite, create an app if needed, then paste the URL below into your app’s “Redirect URL” field.</p>
                 <div className="flex gap-2">
-                  <code className={`flex-1 min-w-0 truncate rounded px-2 py-1.5 text-xs ${darkMode ? 'bg-slate-700 text-slate-200' : 'bg-gray-100 text-gray-800'}`} title={kiteRedirectUrl}>{kiteRedirectUrl || '…'}</code>
-                  <button type="button" onClick={() => { try { navigator.clipboard.writeText(kiteRedirectUrl); } catch (_) {} }} className="shrink-0 px-2 py-1.5 rounded border border-gray-300 dark:border-slate-600 text-xs font-medium">Copy</button>
+                  <code className={`flex-1 min-w-0 truncate rounded px-2 py-1.5 text-xs ${darkMode ? 'bg-slate-700 text-slate-200' : 'bg-gray-100 text-gray-800'}`} title={kiteRedirectUrlDisplay}>{kiteRedirectUrlDisplay}</code>
+                  <button type="button" onClick={() => { try { navigator.clipboard.writeText(kiteRedirectUrlDisplay); } catch (_) {} }} className="shrink-0 px-2 py-1.5 rounded border border-gray-300 dark:border-slate-600 text-xs font-medium">Copy</button>
                 </div>
                 <a href="https://developers.kite.trade" target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-1 mt-2 text-xs font-medium text-blue-600 dark:text-blue-400 hover:underline">
                   Open Kite developer console →
