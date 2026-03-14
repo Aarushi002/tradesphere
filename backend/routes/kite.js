@@ -68,13 +68,22 @@ router.get('/callback', async (req, res) => {
 
   let stateValue = null;
   if (stateRaw) {
-    try {
-      const b64 = stateRaw.replace(/-/g, '+').replace(/_/g, '/');
-      stateValue = Buffer.from(b64, 'base64').toString('utf8');
-    } catch (_) {}
+    // Accept plain "market" in case state was not encoded
+    if (stateRaw === 'market') {
+      stateValue = 'market';
+    } else {
+      try {
+        const b64 = stateRaw.replace(/-/g, '+').replace(/_/g, '/');
+        const padding = b64.length % 4 ? '='.repeat(4 - (b64.length % 4)) : '';
+        stateValue = Buffer.from(b64 + padding, 'base64').toString('utf8');
+        if (!stateValue || !stateValue.trim()) stateValue = null;
+      } catch (_) {}
+    }
   }
   if (!stateValue) {
-    return res.redirect(`${frontendUrl}?kite_error=invalid_state`);
+    // If state is missing but we have request_token, default to 'market' so one-time connect still works (e.g. Kite or proxy dropped state)
+    if (requestToken) stateValue = 'market';
+    else return res.redirect(`${frontendUrl}?kite_error=invalid_state`);
   }
 
   const checksum = crypto.createHash('sha256').update(apiKey + requestToken + apiSecret).digest('hex');
