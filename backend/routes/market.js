@@ -286,7 +286,13 @@ router.get('/instruments/search', async (req, res) => {
 
 // GET /api/market/realtime-status - whether live tick feed (TrueData) is connected
 router.get('/realtime-status', (req, res) => {
-  res.json({ live: isRealtimeConnected() });
+  const configured = isRealtimeConfigured();
+  const live = isRealtimeConnected();
+  res.json({
+    live,
+    configured,
+    message: live ? 'Live' : configured ? 'Connecting or check TrueData credentials' : 'Add TRUEDATA_USER and TRUEDATA_PASSWORD to backend env for live data',
+  });
 });
 
 // GET /api/market/quotes?symbols=NIFTY 50,SENSEX,RELIANCE,TCS,...

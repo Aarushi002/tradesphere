@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef } from 'react';
 import { formatINR, formatINRCompact } from '../utils/currency';
 import PriceChart from '../components/PriceChart';
+import AutoTrading from './AutoTrading';
 
 const API_URL = process.env.REACT_APP_API_URL || 'http://localhost:5000';
 
@@ -161,6 +162,7 @@ export default function Dashboard({ user, onLogout, darkMode, onToggleDarkMode }
   const [indices, setIndices] = useState([]);
   const [quotes, setQuotes] = useState({});
   const [dataFeedLive, setDataFeedLive] = useState(false); // true when TrueData WebSocket connected (live tick feed)
+  const [realtimeConfigured, setRealtimeConfigured] = useState(false); // true when backend has TrueData credentials
   const [quotesApiUnavailable, setQuotesApiUnavailable] = useState(false); // true when backend returns 503 (Kite not configured)
   const [kiteSetupOpen, setKiteSetupOpen] = useState(false); // one-time setup (modal never opened — Zerodha not used)
   const kiteRedirectUrlDisplay = `${API_URL.replace(/\/$/, '')}/api/kite/callback`;
@@ -183,6 +185,19 @@ export default function Dashboard({ user, onLogout, darkMode, onToggleDarkMode }
   const [orderProduct, setOrderProduct] = useState('CNC');
   const [orderPrice, setOrderPrice] = useState('');
   const [orderType, setOrderType] = useState('MARKET');
+  const [orderModalTab, setOrderModalTab] = useState('Regular'); // 'Regular' | 'Iceberg'
+  const [orderStoploss, setOrderStoploss] = useState(false);
+  const [orderGtt, setOrderGtt] = useState(false);
+  const [orderMarketProtection, setOrderMarketProtection] = useState(false);
+  const [quantityMode, setQuantityMode] = useState('units'); // 'units' | 'lots'
+  const [icebergLegs, setIcebergLegs] = useState(2);
+  const [orderSlTrigger, setOrderSlTrigger] = useState('');
+  const [orderSlType, setOrderSlType] = useState('SL-M'); // 'SL-M' | 'SL-L'
+  const [orderSlLimitPrice, setOrderSlLimitPrice] = useState('');
+  const [orderGttTrigger, setOrderGttTrigger] = useState('');
+  const [orderGttPrice, setOrderGttPrice] = useState('');
+  const [educationModal, setEducationModal] = useState(null); // null | 'stoploss' | 'gtt'
+  const [orderAdvancedOpen, setOrderAdvancedOpen] = useState(false);
   const [kiteMargins, setKiteMargins] = useState(null);
   const [mfHoldings, setMfHoldings] = useState([]);
   const [mfOrders, setMfOrders] = useState([]);
@@ -449,8 +464,11 @@ export default function Dashboard({ user, onLogout, darkMode, onToggleDarkMode }
     const check = () => {
       fetch(`${API_URL}/api/market/realtime-status`)
         .then((res) => res.ok ? res.json() : Promise.reject())
-        .then((json) => setDataFeedLive(Boolean(json?.live)))
-        .catch(() => setDataFeedLive(false));
+        .then((json) => {
+          setDataFeedLive(Boolean(json?.live));
+          setRealtimeConfigured(Boolean(json?.configured));
+        })
+        .catch(() => { setDataFeedLive(false); setRealtimeConfigured(false); });
     };
     check();
     const id = setInterval(check, 30000);
@@ -471,6 +489,23 @@ export default function Dashboard({ user, onLogout, darkMode, onToggleDarkMode }
     if (!sym) return;
     setWatchlist((prev) => (prev.includes(sym) ? prev : [...prev, sym]));
     setSearchQuery('');
+  }
+
+  function refreshOrderSymbolQuotes(sym) {
+    const token = getToken();
+    if (token) {
+      fetch(`${API_URL}/api/portfolio`, { headers: { Authorization: `Bearer ${token}` } })
+        .then((r) => r.ok ? r.json() : Promise.reject())
+        .then((d) => setPortfolio(d))
+        .catch(() => {});
+    }
+    const apiSym = (sym || symbol || '').toString().trim();
+    if (!apiSym) return;
+    const qs = apiSym.includes(':') ? apiSym : apiSym.replace(/\s+/g, ' ');
+    fetch(`${API_URL}/api/market/quotes?symbols=${encodeURIComponent(qs)}`, { headers: token ? { Authorization: `Bearer ${token}` } : {} })
+      .then((res) => res.ok ? res.json() : Promise.reject())
+      .then(updateQuotesFromResponse)
+      .catch(() => {});
   }
 
   function removeFromWatchlist(s) {
@@ -575,6 +610,14 @@ export default function Dashboard({ user, onLogout, darkMode, onToggleDarkMode }
     return /CE$/.test(s) || /PE$/.test(s);
   }
 
+  /** Lot size for F&O: NIFTY/BANKNIFTY options = 50, else 1 (equity/cash). */
+  function getLotSize(ex, trSymbol) {
+    if (ex !== 'NFO') return 1;
+    const s = String(trSymbol || '').toUpperCase();
+    if (/NIFTY.*(CE|PE)$/.test(s) || /BANKNIFTY.*(CE|PE)$/.test(s) || /SENSEX.*(CE|PE)$/.test(s)) return 50;
+    return 50;
+  }
+
   async function placeOrder(transactionType) {
     const [ex, trSymbol] = symbol.includes(':') ? symbol.split(':') : ['NSE', symbol];
     const qty = Number(quantity) || 1;
@@ -654,6 +697,7 @@ export default function Dashboard({ user, onLogout, darkMode, onToggleDarkMode }
     { id: 'positions', label: 'Positions' },
     { id: 'bids', label: 'Bids' },
     { id: 'funds', label: 'Funds' },
+    { id: 'autotrading', label: 'Auto Trading' },
   ];
 
   const getQuoteKeyForSort = (sym) => {
@@ -721,7 +765,12 @@ export default function Dashboard({ user, onLogout, darkMode, onToggleDarkMode }
               <span className="text-[10px] sm:text-xs text-green-600 dark:text-green-400 font-medium shrink-0" title="Live tick data (TrueData)">Live</span>
             )}
             {!dataFeedLive && indices.length > 0 && (
-              <span className="text-[10px] sm:text-xs text-gray-500 dark:text-slate-400 shrink-0" title="Free feed, typically 15–20 min delayed">Delayed (~15 min)</span>
+              <span
+                className="text-[10px] sm:text-xs text-gray-500 dark:text-slate-400 shrink-0"
+                title={realtimeConfigured ? 'TrueData connecting or check credentials. Restart backend after setting TRUEDATA_USER and TRUEDATA_PASSWORD.' : 'Free Yahoo feed, ~15–20 min delayed. For live data: add TRUEDATA_USER and TRUEDATA_PASSWORD to backend .env (see backend README) and restart.'}
+              >
+                Delayed (~15 min)
+              </span>
             )}
             {quotesApiUnavailable && (
               <span className="text-[10px] sm:text-xs text-amber-600 dark:text-amber-400 shrink-0" title="Prices may be delayed">Delayed</span>
@@ -792,100 +841,333 @@ export default function Dashboard({ user, onLogout, darkMode, onToggleDarkMode }
         </div>
       </header>
 
-      {/* Zerodha-style order popup when clicking B/S from watchlist */}
+      {/* Order modal — matches reference: header, instrument card, Regular/Iceberg, Quantity, Market/Limit, Intraday/Overnight, toggles, margin, SWIPE TO BUY/SELL */}
       {orderModalOpen && orderModalSide && (() => {
         const [ex, trSymbol] = symbol.includes(':') ? symbol.split(':') : ['NSE', symbol];
         const isNfo = ex === 'NFO';
         const isOpt = /(CE|PE)$/.test(String(trSymbol).toUpperCase());
         const optionsRequireLimit = isNfo && isOpt;
         const quoteKey = symbol.includes(':') ? symbol.split(':')[1] : (symbol === 'NIFTY 50' ? 'NIFTY 50' : symbol === 'NIFTY BANK' ? 'NIFTY BANK' : symbol);
-        const ltp = quotes[quoteKey]?.lastPrice ?? quotes[quoteKey]?.value ?? null;
+        const lotSize = getLotSize(ex, trSymbol);
+        const isFnoOpt = isNfo && isOpt;
+        const effectiveQty = Number(quantity) || 0;
+        const ltpRaw = quotes[quoteKey]?.lastPrice ?? quotes[quoteKey]?.value ?? null;
+        const ltp = ltpRaw != null ? ltpRaw : (() => {
+          const altKeys = [trSymbol, symbol.replace(/\s/g, ''), getSymbolDisplayLabel(symbol).replace(/\s/g, '')];
+          for (const k of altKeys) { const v = quotes[k]?.lastPrice ?? quotes[k]?.value; if (v != null) return v; }
+          return null;
+        })();
+        const change = quotes[quoteKey]?.change ?? null;
+        const changePercent = quotes[quoteKey]?.changePercent ?? null;
         const priceVal = orderType === 'LIMIT' || optionsRequireLimit ? (Number(orderPrice) || ltp) : ltp;
-        const qtyNum = Number(quantity) || 1;
-        const reqAmount = (priceVal != null && priceVal > 0) ? qtyNum * priceVal : 0;
+        const reqAmount = (priceVal != null && priceVal > 0) ? effectiveQty * priceVal : 0;
+        const premiumEst = isFnoOpt && (ltp != null || orderPrice) ? effectiveQty * (Number(orderPrice) || ltp || 0) : 0;
+        const marginUsed = isFnoOpt ? premiumEst : reqAmount;
         const avail = portfolio?.user?.cashBalance ?? 0;
         const segmentLabel = ex === 'NFO' ? 'NFO' : ex === 'BSE' ? 'BSE' : 'NSE';
         const isSell = orderModalSide === 'SELL';
+        const accentClass = isSell ? 'text-red-600 dark:text-red-400 border-red-500' : 'text-blue-600 dark:text-blue-400 border-blue-500';
+        const btnClass = isSell ? 'bg-red-500 hover:bg-red-600' : 'bg-blue-600 hover:bg-blue-700';
+        const isMarket = orderType === 'MARKET';
+        const qtyInvalidLot = isFnoOpt && effectiveQty > 0 && effectiveQty % lotSize !== 0;
+        const icebergTotal = orderModalTab === 'Iceberg' ? effectiveQty : 0;
+        const icebergQtyPerLeg = icebergLegs > 0 ? Math.floor(icebergTotal / icebergLegs) : 0;
+        const icebergValid = orderModalTab !== 'Iceberg' || (icebergTotal >= lotSize && icebergTotal % lotSize === 0 && icebergQtyPerLeg >= lotSize && icebergQtyPerLeg % lotSize === 0);
         return (
-          <div className="fixed inset-0 z-[100] flex items-start justify-center pt-[10vh] px-3 pb-4 overflow-y-auto">
-            <div className="absolute inset-0 bg-black/50" onClick={() => { setOrderModalOpen(false); setOrderModalSide(null); }} aria-hidden="true" />
-            <div className={`relative w-full max-w-md rounded-xl shadow-xl overflow-hidden ${darkMode ? 'bg-slate-800' : 'bg-white'}`} onClick={(e) => e.stopPropagation()}>
-              {/* Header - orange for Sell, green for Buy */}
-              <div className={`px-4 py-3 ${isSell ? 'bg-orange-500' : 'bg-blue-600'} text-white`}>
-                <div className="flex items-start justify-between gap-2">
-                  <div className="min-w-0">
-                    <p className="font-semibold truncate">{getSymbolDisplayLabel(symbol).replace(/\s w\s/g, ' ʷ ')}</p>
-                    <p className="text-white/90 text-sm">{segmentLabel} {ltp != null ? formatINR(ltp) : '—'}</p>
+          <div className="fixed inset-0 z-[100] flex items-center justify-center p-0 md:p-4">
+            <div className="absolute inset-0 bg-black/50 md:bg-black/40" onClick={() => { setOrderModalOpen(false); setOrderModalSide(null); setOrderAdvancedOpen(false); }} aria-hidden="true" />
+            <div className="relative flex flex-col w-full max-w-md md:max-h-[90vh] md:rounded-xl md:overflow-hidden bg-white dark:bg-slate-900 h-full md:h-auto md:max-h-[85vh] shadow-xl">
+            {/* Header: back, title, menu */}
+            <div className={`flex items-center justify-between gap-2 px-3 py-3 border-b shrink-0 ${darkMode ? 'border-slate-700 bg-slate-800' : 'border-gray-200 bg-white'}`}>
+              <button type="button" onClick={() => { setOrderModalOpen(false); setOrderModalSide(null); setOrderAdvancedOpen(false); }} className="p-2 -ml-1 rounded-full hover:bg-gray-100 dark:hover:bg-slate-700 text-gray-700 dark:text-slate-200" aria-label="Back">&lt;</button>
+              <h2 className="flex-1 text-center font-semibold text-gray-900 dark:text-slate-100 truncate">{getSymbolDisplayLabel(symbol).replace(/\s w\s/g, ' ʷ ')}</h2>
+              <div className="w-10 flex justify-end">
+                <button type="button" className="p-2 rounded-full hover:bg-gray-100 dark:hover:bg-slate-700 text-gray-500 dark:text-slate-400" aria-label="More">⋮</button>
+              </div>
+            </div>
+            {/* Instrument card — gray box: NFO, price, change, % */}
+            <div className={`px-4 py-3 ${darkMode ? 'bg-slate-700/50' : 'bg-gray-100'}`}>
+              <div className="flex items-center gap-2 flex-wrap">
+                <span className="text-sm text-gray-600 dark:text-slate-400">{segmentLabel}</span>
+                <span className={`text-lg font-semibold ${change != null && change < 0 ? 'text-red-600 dark:text-red-400' : 'text-green-600 dark:text-green-400'}`}>{ltp != null ? formatINR(ltp) : '—'}</span>
+                {change != null && (
+                  <span className={change < 0 ? 'text-red-600 dark:text-red-400' : 'text-green-600 dark:text-green-400'}>
+                    {change >= 0 ? '+' : ''}{Number(change).toFixed(2)}
+                  </span>
+                )}
+                {changePercent != null && (
+                  <span className={changePercent < 0 ? 'text-red-600 dark:text-red-400' : 'text-green-600 dark:text-green-400'}>
+                    {changePercent >= 0 ? '+' : ''}{Number(changePercent).toFixed(2)}%
+                  </span>
+                )}
+              </div>
+            </div>
+            {/* Tabs: Regular | Iceberg */}
+            <div className={`flex border-b shrink-0 ${darkMode ? 'border-slate-700' : 'border-gray-200'}`}>
+              <button type="button" onClick={() => setOrderModalTab('Regular')} className={`flex-1 py-3 text-sm font-medium border-b-2 ${orderModalTab === 'Regular' ? accentClass : darkMode ? 'border-transparent text-gray-500 dark:text-slate-400' : 'border-transparent text-gray-500'}`}>Regular</button>
+              <button type="button" onClick={() => setOrderModalTab('Iceberg')} className={`flex-1 py-3 text-sm font-medium border-b-2 ${orderModalTab === 'Iceberg' ? accentClass : darkMode ? 'border-transparent text-gray-500 dark:text-slate-400' : 'border-transparent text-gray-500'}`}>Iceberg</button>
+            </div>
+            <div className="flex-1 overflow-y-auto p-4 space-y-4">
+              {/* Quantity — label shows mode (Lots / Quantity); cube icon toggles; input, arrows */}
+              <div className="space-y-1">
+                <div className="flex items-center justify-between">
+                  <label className="text-sm font-medium text-gray-700 dark:text-slate-300">{isFnoOpt && quantityMode === 'lots' ? 'Lots' : 'Quantity'}</label>
+                  {isFnoOpt && <span className="text-xs text-gray-500 dark:text-slate-400">1 lot = {lotSize} qty</span>}
+                </div>
+                <div className="flex items-center rounded border border-gray-300 dark:border-slate-600 overflow-hidden bg-white dark:bg-slate-800">
+                  <input
+                    type="number"
+                    min={quantityMode === 'lots' && isFnoOpt ? 1 : 1}
+                    step={quantityMode === 'lots' && isFnoOpt ? 1 : (isFnoOpt ? lotSize : 1)}
+                    value={quantityMode === 'lots' && isFnoOpt ? (effectiveQty / lotSize || '') : quantity}
+                    onChange={(e) => {
+                      const v = e.target.value;
+                      if (quantityMode === 'lots' && isFnoOpt) setQuantity(String(Math.max(0, Math.round(parseFloat(v) || 0) * lotSize)));
+                      else setQuantity(v);
+                    }}
+                    placeholder={quantityMode === 'lots' && isFnoOpt ? '1' : (isFnoOpt ? String(lotSize) : '1')}
+                    className="flex-1 min-w-0 px-3 py-2.5 text-sm bg-transparent border-0 outline-none focus:ring-0 text-gray-900 dark:text-slate-100"
+                  />
+                  <div className="flex items-center shrink-0 border-l border-gray-200 dark:border-slate-600">
+                    <div className="flex flex-col">
+                      <button type="button" onClick={() => setQuantity(quantityMode === 'lots' && isFnoOpt ? String(effectiveQty + lotSize) : String((Number(quantity) || 0) + (isFnoOpt ? lotSize : 1)))} className="px-2 py-1 text-gray-400 hover:text-gray-700 dark:hover:text-slate-200 hover:bg-gray-100 dark:hover:bg-slate-700">▲</button>
+                      <button type="button" onClick={() => setQuantity(quantityMode === 'lots' && isFnoOpt ? String(Math.max(lotSize, effectiveQty - lotSize)) : String(Math.max(isFnoOpt ? lotSize : 1, (Number(quantity) || 0) - (isFnoOpt ? lotSize : 1))))} className="px-2 py-1 text-gray-400 hover:text-gray-700 dark:hover:text-slate-200 hover:bg-gray-100 dark:hover:bg-slate-700 border-t border-gray-200 dark:border-slate-600">▼</button>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => setQuantityMode((m) => (m === 'lots' ? 'units' : 'lots'))}
+                      title={quantityMode === 'lots' ? 'Switch to quantity' : 'Switch to lots'}
+                      className={`px-2 py-2 border-l border-gray-200 dark:border-slate-600 transition-colors ${quantityMode === 'lots' ? (isSell ? 'bg-orange-100 dark:bg-orange-900/30 text-orange-600 dark:text-orange-400' : 'bg-blue-100 dark:bg-blue-900/30 text-blue-600 dark:text-blue-400') : 'text-gray-500 dark:text-slate-400 hover:bg-gray-100 dark:hover:bg-slate-700'}`}
+                      aria-label={quantityMode === 'lots' ? 'Switch to quantity' : 'Switch to lots'}
+                    >
+                      <span className="text-base leading-none">▦</span>
+                    </button>
                   </div>
-                  <span className={`text-[10px] font-medium px-1.5 py-0.5 rounded shrink-0 ${tradingMode === 'paper' ? 'bg-white/20' : 'bg-white/20'}`}>{tradingMode === 'paper' ? 'Paper' : 'Live'}</span>
+                </div>
+                {qtyInvalidLot && <p className="text-xs text-gray-500 dark:text-slate-400 mt-1">Enter quantity in multiples of {lotSize}</p>}
+                {isFnoOpt && effectiveQty > 0 && effectiveQty % lotSize === 0 && <p className="text-xs text-gray-500 dark:text-slate-400 mt-0.5">{effectiveQty} qty = {effectiveQty / lotSize} lot(s)</p>}
+              </div>
+              {/* Iceberg — total qty, legs, qty per leg */}
+              {orderModalTab === 'Iceberg' && (
+                <div className={`rounded-lg border p-3 space-y-2 ${darkMode ? 'border-slate-600 bg-slate-800/50' : 'border-gray-200 bg-gray-50'}`}>
+                  <p className="text-sm font-medium text-gray-700 dark:text-slate-300">Iceberg order</p>
+                  <div className="grid grid-cols-2 gap-2">
+                    <div>
+                      <label className="block text-xs text-gray-500 dark:text-slate-400 mb-0.5">Total quantity</label>
+                      <p className="text-sm font-medium">{effectiveQty} qty</p>
+                    </div>
+                    <div>
+                      <label className="block text-xs text-gray-500 dark:text-slate-400 mb-0.5">Number of legs</label>
+                      <input type="number" min={2} max={20} value={icebergLegs} onChange={(e) => setIcebergLegs(Math.max(2, Math.min(20, parseInt(e.target.value, 10) || 2)))} className={`w-full rounded border px-2 py-1.5 text-sm ${darkMode ? 'border-slate-600 bg-slate-700' : 'border-gray-300 bg-white'}`} />
+                    </div>
+                  </div>
+                  <p className="text-xs text-gray-500 dark:text-slate-400">Quantity per leg: <strong>{icebergQtyPerLeg}</strong> qty</p>
+                  {orderModalTab === 'Iceberg' && !icebergValid && effectiveQty > 0 && <p className="text-xs text-gray-500 dark:text-slate-400">Total and per-leg in multiples of {lotSize}</p>}
+                </div>
+              )}
+              {/* Price — Default: "Market price" (striped, 0, pencil). Click pencil → "Price" input with clear (X) and arrows. Options always show Price. */}
+              <div className="space-y-1">
+                <label className="text-sm font-medium text-gray-700 dark:text-slate-300">{isMarket ? 'Market price' : 'Price'}</label>
+                {isMarket ? (
+                  <div className={`flex items-center justify-between rounded border px-3 py-2.5 text-sm text-gray-500 dark:text-slate-400 ${darkMode ? 'border-slate-600' : 'border-gray-300'}`} style={darkMode ? { background: 'repeating-linear-gradient(-45deg, rgb(30 41 59), rgb(30 41 59) 4px, rgba(255,255,255,0.04) 4px, rgba(255,255,255,0.04) 8px)' } : { background: 'repeating-linear-gradient(-45deg, #f9fafb, #f9fafb 4px, rgba(0,0,0,0.04) 4px, rgba(0,0,0,0.04) 8px)' }}>
+                    <span>0</span>
+                    <button type="button" onClick={() => setOrderType('LIMIT')} className="p-1.5 rounded bg-gray-200/80 dark:bg-slate-600/80 text-gray-500 dark:text-slate-400 hover:bg-gray-300 dark:hover:bg-slate-500 hover:text-gray-700 dark:hover:text-slate-200" title="Set your price" aria-label="Set your price">
+                      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7" /><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z" /></svg>
+                    </button>
+                  </div>
+                ) : (
+                  <div className="flex items-center rounded border border-gray-300 dark:border-slate-600 overflow-hidden bg-white dark:bg-slate-800">
+                    <input
+                      type="number"
+                      step="0.05"
+                      min="0"
+                      placeholder={ltp != null ? String(ltp) : '0'}
+                      value={orderPrice}
+                      onChange={(e) => setOrderPrice(e.target.value)}
+                      className="flex-1 min-w-0 px-3 py-2.5 text-sm text-gray-900 dark:text-slate-100 bg-transparent border-0 outline-none focus:ring-0"
+                    />
+                    {orderPrice && (
+                      <button type="button" onClick={() => setOrderPrice('')} className="p-2 text-orange-500 hover:text-orange-600 dark:text-orange-400 dark:hover:text-orange-300 shrink-0" title="Clear price" aria-label="Clear price">×</button>
+                    )}
+                    <div className="flex flex-col border-l border-gray-200 dark:border-slate-600 shrink-0">
+                      <button type="button" onClick={() => setOrderPrice(String((Number(orderPrice) || 0) + 0.05))} className="px-2 py-1 text-gray-400 hover:text-gray-700 dark:hover:text-slate-200 hover:bg-gray-100 dark:hover:bg-slate-700">▲</button>
+                      <button type="button" onClick={() => setOrderPrice(String(Math.max(0, (Number(orderPrice) || 0) - 0.05)))} className="px-2 py-1 text-gray-400 hover:text-gray-700 dark:hover:text-slate-200 hover:bg-gray-100 dark:hover:bg-slate-700 border-t border-gray-200 dark:border-slate-600">▼</button>
+                    </div>
+                    {!optionsRequireLimit && (
+                      <button type="button" onClick={() => setOrderType('MARKET')} className="p-1.5 border-l border-gray-200 dark:border-slate-600 text-gray-400 hover:text-gray-600 dark:hover:text-slate-200 shrink-0" title="Back to market price" aria-label="Back to market price">
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7" /><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z" /></svg>
+                      </button>
+                    )}
+                  </div>
+                )}
+                {isMarket && optionsRequireLimit && <p className="text-xs text-gray-500 dark:text-slate-400">Options need limit price — tap pencil to set</p>}
+                {!isMarket && optionsRequireLimit && !orderPrice && <p className="text-xs text-gray-500 dark:text-slate-400">Enter limit price for options</p>}
+              </div>
+              {/* Intraday | Overnight — radios */}
+              <div>
+                <div className="flex gap-6">
+                  <label className="flex items-center gap-2 cursor-pointer">
+                    <input type="radio" name="orderDuration" checked={orderProduct === 'MIS'} onChange={() => setOrderProduct('MIS')} className="text-blue-600 dark:text-blue-400" />
+                    <span className="text-sm text-gray-700 dark:text-slate-300">Intraday</span>
+                  </label>
+                  <label className="flex items-center gap-2 cursor-pointer">
+                    <input type="radio" name="orderDuration" checked={orderProduct === 'NRML' || orderProduct === 'CNC'} onChange={() => setOrderProduct(isNfo ? 'NRML' : 'CNC')} className={isSell ? 'text-red-600' : 'text-blue-600'} />
+                    <span className="text-sm text-gray-700 dark:text-slate-300">Overnight</span>
+                  </label>
                 </div>
               </div>
-              {/* Tabs: Quick / Regular / Iceberg */}
-              <div className="flex border-b border-gray-200 dark:border-slate-600">
-                <button type="button" className={`px-4 py-2.5 text-sm font-medium ${isSell ? 'text-orange-600 dark:text-orange-400 border-b-2 border-orange-500' : 'text-blue-600 dark:text-blue-400 border-b-2 border-blue-500'}`}>Quick</button>
-                <button type="button" className="px-4 py-2.5 text-sm font-medium text-gray-500 dark:text-slate-400 border-b-2 border-transparent">Regular</button>
-                <button type="button" className="px-4 py-2.5 text-sm font-medium text-gray-500 dark:text-slate-400 border-b-2 border-transparent">Iceberg</button>
-              </div>
-              <div className="p-4 space-y-4">
-                {/* Qty */}
-                <div>
-                  <label className="block text-xs font-medium text-gray-500 dark:text-slate-400 mb-1">Qty.</label>
-                  <div className="flex items-center gap-1">
-                    <input type="number" min={1} value={quantity} onChange={(e) => setQuantity(e.target.value)} className={`flex-1 min-w-0 rounded border px-3 py-2.5 text-sm ${darkMode ? 'border-slate-600 bg-slate-700 text-slate-100' : 'border-gray-300 bg-white text-gray-900'}`} />
-                    <button type="button" onClick={() => setQuantity(String(Math.max(1, (Number(quantity) || 1) - 1)))} className="p-2 rounded border border-gray-300 dark:border-slate-600 bg-white dark:bg-slate-700 text-gray-600 dark:text-slate-300">−</button>
-                    <button type="button" onClick={() => setQuantity(String((Number(quantity) || 1) + 1))} className="p-2 rounded border border-gray-300 dark:border-slate-600 bg-white dark:bg-slate-700 text-gray-600 dark:text-slate-300">+</button>
-                  </div>
-                </div>
-                {/* Price */}
-                <div>
-                  <label className="block text-xs font-medium text-gray-500 dark:text-slate-400 mb-1">Price</label>
-                  <div className="flex items-center gap-1">
-                    <input type="number" step="0.05" placeholder={ltp != null ? String(ltp) : '0'} value={orderPrice} onChange={(e) => setOrderPrice(e.target.value)} className={`flex-1 min-w-0 rounded border px-3 py-2.5 text-sm ${darkMode ? 'border-slate-600 bg-slate-700 text-slate-100' : 'border-gray-300 bg-white text-gray-900'}`} />
-                    <button type="button" onClick={() => setOrderPrice('')} className="p-2 rounded border border-gray-300 dark:border-slate-600 bg-white dark:bg-slate-700 text-gray-500 dark:text-slate-400" title="Clear">×</button>
-                  </div>
-                </div>
-                {/* Order type & Product */}
-                <div className="grid grid-cols-2 gap-3">
-                  <div>
-                    <label className="block text-xs font-medium text-gray-500 dark:text-slate-400 mb-1">Type</label>
-                    <select value={orderType} onChange={(e) => setOrderType(e.target.value)} disabled={optionsRequireLimit} className={`w-full rounded border px-2 py-2 text-sm ${darkMode ? 'border-slate-600 bg-slate-700 text-slate-100' : 'border-gray-300 bg-white text-gray-900'}`}>
-                      <option value="MARKET">Market</option>
-                      <option value="LIMIT">Limit</option>
-                    </select>
-                  </div>
-                  <div>
-                    <label className="block text-xs font-medium text-gray-500 dark:text-slate-400 mb-1">Product</label>
-                    <select value={orderProduct} onChange={(e) => setOrderProduct(e.target.value)} className={`w-full rounded border px-2 py-2 text-sm ${darkMode ? 'border-slate-600 bg-slate-700 text-slate-100' : 'border-gray-300 bg-white text-gray-900'}`}>
-                      {isNfo ? (<><option value="MIS">MIS</option><option value="NRML">NRML</option></>) : (<><option value="CNC">CNC</option><option value="MIS">MIS</option><option value="NRML">NRML</option></>)}
-                    </select>
-                  </div>
-                </div>
-                {optionsRequireLimit && <p className="text-xs text-amber-600 dark:text-amber-400">Options require Limit order and price</p>}
-                {/* Intraday checkbox */}
-                <label className="flex items-center gap-2 cursor-pointer">
-                  <input type="checkbox" checked={orderProduct === 'MIS'} onChange={(e) => setOrderProduct(e.target.checked ? 'MIS' : (isNfo ? 'NRML' : 'CNC'))} className="rounded border-gray-300 dark:border-slate-600" />
-                  <span className="text-sm text-gray-700 dark:text-slate-300">Intraday</span>
-                  <span className="text-xs text-gray-500 dark:text-slate-400">1 lot</span>
-                </label>
-                {/* Req. / Avail. */}
-                <div className="text-sm space-y-1">
-                  <p className="text-gray-600 dark:text-slate-400">Req. {formatINR(reqAmount)}</p>
-                  <p className="text-gray-600 dark:text-slate-400">Avail. {formatINR(avail)}</p>
-                </div>
-                {/* Actions */}
-                <div className="grid grid-cols-2 gap-3 pt-2">
-                  <button type="button" onClick={() => { placeOrder(orderModalSide); setOrderModalOpen(false); setOrderModalSide(null); }} disabled={kiteOrderLoading || (optionsRequireLimit && !orderPrice)} className={`py-3 rounded-lg font-semibold text-white touch-manipulation disabled:opacity-50 disabled:cursor-not-allowed ${isSell ? 'bg-orange-500 hover:bg-orange-600' : 'bg-blue-600 hover:bg-blue-700'}`}>
-                    {kiteOrderLoading ? '...' : orderModalSide}
+              {/* Stoploss — toggle + expandable Trigger, SL-M / SL-L */}
+              <div className="space-y-3">
+                <div className="flex items-center justify-between">
+                  <span className="flex items-center gap-1.5 text-sm text-gray-700 dark:text-slate-300">Stoploss <button type="button" onClick={() => setEducationModal('stoploss')} className="text-blue-500 hover:text-blue-600 cursor-help font-medium" title="Learn about Stoploss">ⓘ</button></span>
+                  <button type="button" role="switch" aria-checked={orderStoploss} onClick={() => setOrderStoploss((v) => !v)} className={`relative w-11 h-6 rounded-full transition-colors ${orderStoploss ? (isSell ? 'bg-red-500' : 'bg-blue-500') : darkMode ? 'bg-slate-600' : 'bg-gray-300'}`}>
+                    <span className={`absolute top-0.5 left-0.5 w-5 h-5 rounded-full bg-white shadow transition-transform ${orderStoploss ? 'translate-x-5' : 'translate-x-0'}`} />
                   </button>
-                  <button type="button" onClick={() => { setOrderModalOpen(false); setOrderModalSide(null); }} className="py-3 rounded-lg font-medium border border-gray-300 dark:border-slate-600 bg-white dark:bg-slate-700 text-gray-700 dark:text-slate-200 hover:bg-gray-50 dark:hover:bg-slate-600 touch-manipulation">
-                    Cancel
+                </div>
+                {orderStoploss && (
+                  <div className={`rounded-lg border p-3 space-y-2 pl-4 border-l-4 ${isSell ? 'border-red-500/50' : 'border-blue-500/50'} ${darkMode ? 'bg-slate-800/50' : 'bg-gray-50'}`}>
+                    <div>
+                      <label className="block text-xs font-medium text-gray-500 dark:text-slate-400 mb-0.5">Trigger price (₹)</label>
+                      <input type="number" step="0.05" placeholder="0" value={orderSlTrigger} onChange={(e) => setOrderSlTrigger(e.target.value)} className={`w-full rounded border px-2.5 py-2 text-sm ${darkMode ? 'border-slate-600 bg-slate-700' : 'border-gray-300 bg-white'}`} />
+                    </div>
+                    <div className="flex gap-4">
+                      <label className="flex items-center gap-2 cursor-pointer">
+                        <input type="radio" name="slType" checked={orderSlType === 'SL-M'} onChange={() => setOrderSlType('SL-M')} />
+                        <span className="text-sm">SL-M (Market)</span>
+                      </label>
+                      <label className="flex items-center gap-2 cursor-pointer">
+                        <input type="radio" name="slType" checked={orderSlType === 'SL-L'} onChange={() => setOrderSlType('SL-L')} />
+                        <span className="text-sm">SL-L (Limit)</span>
+                      </label>
+                    </div>
+                    {orderSlType === 'SL-L' && (
+                      <div>
+                        <label className="block text-xs font-medium text-gray-500 dark:text-slate-400 mb-0.5">Limit price (₹)</label>
+                        <input type="number" step="0.05" placeholder="0" value={orderSlLimitPrice} onChange={(e) => setOrderSlLimitPrice(e.target.value)} className={`w-full rounded border px-2.5 py-2 text-sm ${darkMode ? 'border-slate-600 bg-slate-700' : 'border-gray-300 bg-white'}`} />
+                      </div>
+                    )}
+                  </div>
+                )}
+                {/* GTT — toggle + expandable Trigger, Order price */}
+                <div className="flex items-center justify-between">
+                  <span className="flex items-center gap-1.5 text-sm text-gray-700 dark:text-slate-300">GTT <button type="button" onClick={() => setEducationModal('gtt')} className="text-blue-500 hover:text-blue-600 cursor-help font-medium" title="Learn about GTT">ⓘ</button></span>
+                  <button type="button" role="switch" aria-checked={orderGtt} onClick={() => setOrderGtt((v) => !v)} className={`relative w-11 h-6 rounded-full transition-colors ${orderGtt ? (isSell ? 'bg-red-500' : 'bg-blue-500') : darkMode ? 'bg-slate-600' : 'bg-gray-300'}`}>
+                    <span className={`absolute top-0.5 left-0.5 w-5 h-5 rounded-full bg-white shadow transition-transform ${orderGtt ? 'translate-x-5' : 'translate-x-0'}`} />
+                  </button>
+                </div>
+                {orderGtt && (
+                  <div className={`rounded-lg border p-3 space-y-2 pl-4 border-l-4 ${isSell ? 'border-red-500/50' : 'border-blue-500/50'} ${darkMode ? 'bg-slate-800/50' : 'bg-gray-50'}`}>
+                    <div>
+                      <label className="block text-xs font-medium text-gray-500 dark:text-slate-400 mb-0.5">Trigger price (₹)</label>
+                      <input type="number" step="0.05" placeholder="0" value={orderGttTrigger} onChange={(e) => setOrderGttTrigger(e.target.value)} className={`w-full rounded border px-2.5 py-2 text-sm ${darkMode ? 'border-slate-600 bg-slate-700' : 'border-gray-300 bg-white'}`} />
+                    </div>
+                    <div>
+                      <label className="block text-xs font-medium text-gray-500 dark:text-slate-400 mb-0.5">Order price (₹)</label>
+                      <input type="number" step="0.05" placeholder="0" value={orderGttPrice} onChange={(e) => setOrderGttPrice(e.target.value)} className={`w-full rounded border px-2.5 py-2 text-sm ${darkMode ? 'border-slate-600 bg-slate-700' : 'border-gray-300 bg-white'}`} />
+                    </div>
+                  </div>
+                )}
+                <div className="flex items-center justify-between">
+                  <span className="flex items-center gap-1.5 text-sm text-gray-700 dark:text-slate-300">Market protection <span className="text-blue-500 cursor-help" title="Market protection">ⓘ</span></span>
+                  <button type="button" role="switch" aria-checked={orderMarketProtection} onClick={() => setOrderMarketProtection((v) => !v)} className={`relative w-11 h-6 rounded-full transition-colors ${orderMarketProtection ? (isSell ? 'bg-red-500' : 'bg-blue-500') : darkMode ? 'bg-slate-600' : 'bg-gray-300'}`}>
+                    <span className={`absolute top-0.5 left-0.5 w-5 h-5 rounded-full bg-white shadow transition-transform ${orderMarketProtection ? 'translate-x-5' : 'translate-x-0'}`} />
                   </button>
                 </div>
               </div>
             </div>
+            {/* Footer: Help, Advanced, Margin, SWIPE button */}
+            <div className={`border-t p-4 shrink-0 ${darkMode ? 'border-slate-700 bg-slate-800' : 'border-gray-200 bg-gray-50'}`}>
+              <div className="flex justify-between text-sm mb-2">
+                <button type="button" onClick={() => setEducationModal('stoploss')} className={isSell ? 'text-red-600 dark:text-red-400 hover:underline' : 'text-blue-600 dark:text-blue-400 hover:underline'}>Help</button>
+                <button type="button" onClick={() => setOrderAdvancedOpen((v) => !v)} className={`flex items-center gap-1 ${isSell ? 'text-red-600 dark:text-red-400 hover:underline' : 'text-blue-600 dark:text-blue-400 hover:underline'}`}>{orderAdvancedOpen ? 'Advanced ∨' : 'Advanced ^'}</button>
+              </div>
+              {orderAdvancedOpen && (
+                <div className={`rounded-lg border p-3 mb-2 text-xs ${darkMode ? 'border-slate-600 bg-slate-800/50 text-slate-300' : 'border-gray-300 bg-gray-100 text-gray-700'}`}>
+                  <p>Qty: {effectiveQty} · Price: {orderType === 'LIMIT' || optionsRequireLimit ? (Number(orderPrice) || '—') : 'Market'} · LTP: {ltp != null ? ltp : '—'}</p>
+                  {isFnoOpt && <p>Premium (qty × price): {formatINR(premiumEst)}</p>}
+                </div>
+              )}
+              {isFnoOpt && effectiveQty > 0 && (
+                <p className="text-xs text-gray-600 dark:text-slate-400 mb-1">Premium (est.) {formatINR(premiumEst)}{!premiumEst && !Number(orderPrice) && ltp == null ? ' — Set limit price or wait for LTP' : ''}</p>
+              )}
+              <div className="flex items-center justify-between text-xs text-gray-600 dark:text-slate-400 mb-4">
+                <span>Margin {formatINR(marginUsed)} + {formatINR(0)} Avail. {formatINR(avail)}</span>
+                <button type="button" onClick={() => refreshOrderSymbolQuotes(symbol)} className="p-1 rounded hover:bg-gray-200 dark:hover:bg-slate-600" aria-label="Refresh margin and LTP">↻</button>
+              </div>
+              <button
+                type="button"
+                onClick={() => { placeOrder(orderModalSide); setOrderModalOpen(false); setOrderModalSide(null); }}
+                disabled={kiteOrderLoading || effectiveQty < (isFnoOpt ? lotSize : 1) || (optionsRequireLimit && !orderPrice) || qtyInvalidLot || (orderModalTab === 'Iceberg' && !icebergValid)}
+                className={`w-full py-4 rounded-full font-semibold text-white uppercase tracking-wide flex items-center justify-center gap-3 touch-manipulation disabled:opacity-50 disabled:cursor-not-allowed ${btnClass}`}
+              >
+                <span className="w-10 h-10 rounded-full bg-white/20 flex items-center justify-center shrink-0">→</span>
+                <span>{kiteOrderLoading ? '...' : `Swipe to ${orderModalSide}`}</span>
+              </button>
+            </div>
+            </div>
           </div>
         );
       })()}
+
+      {/* Education modal: Stoploss | GTT — in-app help article style */}
+      {educationModal && (
+        <div className="fixed inset-0 z-[110] flex flex-col bg-white dark:bg-slate-900">
+          <div className="flex items-center gap-3 px-4 py-3 border-b border-gray-200 dark:border-slate-700 shrink-0">
+            <button type="button" onClick={() => setEducationModal(null)} className="flex items-center gap-2 px-3 py-2 rounded-lg font-medium text-blue-600 dark:text-blue-400 hover:bg-blue-50 dark:hover:bg-blue-900/20 border border-blue-200 dark:border-blue-800" aria-label="Back to order">
+              <span className="text-lg leading-none">←</span> Back to order
+            </button>
+            <h2 className="flex-1 text-center text-lg font-semibold text-gray-900 dark:text-slate-100">{educationModal === 'stoploss' ? 'Stoploss orders' : 'GTT (Good Till Triggered)'}</h2>
+            <button type="button" onClick={() => setEducationModal(null)} className="p-2 rounded-lg hover:bg-gray-100 dark:hover:bg-slate-700 text-gray-700 dark:text-slate-200 font-medium" aria-label="Close" title="Close">×</button>
+          </div>
+          <div className="flex-1 overflow-y-auto p-4 md:p-6 max-w-2xl mx-auto text-sm text-gray-700 dark:text-slate-300 space-y-6">
+            {educationModal === 'stoploss' && (
+              <>
+                <section>
+                  <h3 className="text-base font-semibold text-gray-900 dark:text-slate-100 mb-2">What is a Stoploss order?</h3>
+                  <p>A stoploss (SL) order helps you limit your loss or protect profit by automatically triggering a market or limit order when the price reaches your trigger level. In paper trading, the same logic is simulated—no real money is at risk.</p>
+                </section>
+                <section>
+                  <h3 className="text-base font-semibold text-gray-900 dark:text-slate-100 mb-2">Why use Stoploss?</h3>
+                  <p>Traders use stoploss to cap downside risk, lock in gains, or automate exit rules. Once the trigger price is hit, the order is sent for execution (market or at your limit price).</p>
+                </section>
+                <section>
+                  <h3 className="text-base font-semibold text-gray-900 dark:text-slate-100 mb-2">SL-M vs SL-L</h3>
+                  <p><strong>Stop Loss Market (SL-M):</strong> When the trigger is hit, the order executes at the best available market price. Faster execution, but price may slip in volatile markets.</p>
+                  <p className="mt-2"><strong>Stop Loss Limit (SL-L):</strong> When the trigger is hit, a limit order is placed at the price you set. Better price control, but the order may not fill if the market moves away quickly.</p>
+                </section>
+                <section>
+                  <h3 className="text-base font-semibold text-gray-900 dark:text-slate-100 mb-2">Trigger logic</h3>
+                  <p><strong>Buy stoploss</strong> triggers when the market price rises to or above the trigger. <strong>Sell stoploss</strong> triggers when the market price falls to or below the trigger.</p>
+                </section>
+                <section>
+                  <h3 className="text-base font-semibold text-gray-900 dark:text-slate-100 mb-2">Risks</h3>
+                  <p>In volatile markets, SL-M can experience slippage (fill price worse than expected). SL-L may not get filled if price gaps past your limit. This is simulated in paper trading so you can practice without real capital.</p>
+                </section>
+              </>
+            )}
+            {educationModal === 'gtt' && (
+              <>
+                <section>
+                  <h3 className="text-base font-semibold text-gray-900 dark:text-slate-100 mb-2">What is GTT (Good Till Triggered)?</h3>
+                  <p>GTT orders stay active until your trigger condition is met or you cancel them. They persist across sessions and days—unlike intraday orders, which expire at market close. In paper trading, GTT is simulated the same way.</p>
+                </section>
+                <section>
+                  <h3 className="text-base font-semibold text-gray-900 dark:text-slate-100 mb-2">How does the trigger work?</h3>
+                  <p>You set a <strong>trigger price</strong>. When the market price reaches that level (based on LTP or last traded price in simulation), your order is activated and sent as a market or limit order at the <strong>order price</strong> you specified.</p>
+                </section>
+                <section>
+                  <h3 className="text-base font-semibold text-gray-900 dark:text-slate-100 mb-2">Difference from regular orders</h3>
+                  <p>Regular and intraday orders are sent to the exchange immediately. GTT orders sit on the broker (or in our case, the paper trading engine) until the trigger is hit. They are ideal for target entry, profit booking, or stoploss that you want to leave active for days or weeks.</p>
+                </section>
+                <section>
+                  <h3 className="text-base font-semibold text-gray-900 dark:text-slate-100 mb-2">Use cases</h3>
+                  <p>Common uses: automate buy when price dips to a level, automate sell when price reaches target or stoploss, and OCO (One Cancels Other)—e.g. one GTT for target and one for stoploss, where execution of one cancels the other (supported in advanced setups).</p>
+                </section>
+              </>
+            )}
+          </div>
+        </div>
+      )}
 
       {/* Find an instrument modal - opened from Get started (positions empty state) or Ctrl+Shift+F */}
       {findInstrumentModalOpen && (
@@ -927,24 +1209,48 @@ export default function Dashboard({ user, onLogout, darkMode, onToggleDarkMode }
                   {findInstrumentSuggestions.map((inst) => {
                     const key = inst.key || `${inst.exchange}:${inst.tradingsymbol}`;
                     const tag = (inst.instrument_type || '').toUpperCase() === 'INDEX' ? 'INDICES' : (inst.segment_label || inst.exchange || '').toUpperCase();
+                    const alreadyInWatchlist = watchlist.includes(key);
+                    const addToWatchlist = (e) => {
+                      e.stopPropagation();
+                      if (alreadyInWatchlist) return;
+                      setWatchlist((prev) => [...prev, key]);
+                      setSymbol(key);
+                      setMainNav('dashboard');
+                      setFindInstrumentModalOpen(false);
+                      setFindInstrumentQuery('');
+                      setFindInstrumentSuggestions([]);
+                    };
                     return (
                       <li
                         key={key}
-                        className={`flex items-center justify-between gap-2 px-2 py-2.5 cursor-pointer text-left ${darkMode ? 'hover:bg-slate-700' : 'hover:bg-gray-50'}`}
-                        onClick={() => {
-                          setWatchlist((prev) => (prev.includes(key) ? prev : [...prev, key]));
-                          setSymbol(key);
-                          setMainNav('dashboard');
-                          setFindInstrumentModalOpen(false);
-                          setFindInstrumentQuery('');
-                          setFindInstrumentSuggestions([]);
-                        }}
+                        className={`flex items-center justify-between gap-2 px-2 py-2.5 text-left ${darkMode ? 'hover:bg-slate-700' : 'hover:bg-gray-50'}`}
                       >
-                        <div className="min-w-0 flex-1">
+                        <div
+                          className="min-w-0 flex-1 cursor-pointer"
+                          onClick={() => {
+                            setWatchlist((prev) => (prev.includes(key) ? prev : [...prev, key]));
+                            setSymbol(key);
+                            setMainNav('dashboard');
+                            setFindInstrumentModalOpen(false);
+                            setFindInstrumentQuery('');
+                            setFindInstrumentSuggestions([]);
+                          }}
+                        >
                           <span className="font-medium text-gray-900 dark:text-slate-100 block truncate">{inst.zerodha_display_name || inst.tradingsymbol || inst.name}</span>
                           <span className={`text-xs ${darkMode ? 'text-slate-400' : 'text-gray-500'}`}>{inst.name || inst.tradingsymbol}{inst.segment_label ? ` · ${inst.segment_label}` : ''}</span>
                         </div>
-                        {tag && <span className={`shrink-0 text-[10px] font-medium px-2 py-0.5 rounded ${darkMode ? 'bg-slate-600 text-slate-300' : 'bg-gray-200 text-gray-600'}`}>{tag}</span>}
+                        <div className="flex items-center gap-2 shrink-0">
+                          {tag && <span className={`text-[10px] font-medium px-2 py-0.5 rounded ${darkMode ? 'bg-slate-600 text-slate-300' : 'bg-gray-200 text-gray-600'}`}>{tag}</span>}
+                          <button
+                            type="button"
+                            onClick={addToWatchlist}
+                            disabled={alreadyInWatchlist}
+                            className={`px-2 py-1 text-xs font-medium rounded touch-manipulation ${alreadyInWatchlist ? (darkMode ? 'bg-slate-600 text-slate-400 cursor-default' : 'bg-gray-200 text-gray-400 cursor-default') : 'bg-blue-600 hover:bg-blue-700 text-white'}`}
+                            title={alreadyInWatchlist ? 'In watchlist' : 'Add to watchlist'}
+                          >
+                            {alreadyInWatchlist ? 'Added' : '+ Add'}
+                          </button>
+                        </div>
                       </li>
                     );
                   })}
@@ -1113,35 +1419,66 @@ export default function Dashboard({ user, onLogout, darkMode, onToggleDarkMode }
                   </div>
                 )}
                 <ul className="max-h-72 overflow-auto">
-                  {searchSuggestions.map((inst) => (
-                    <li
-                      key={inst.key || `${inst.exchange}:${inst.tradingsymbol}`}
-                      className={`flex flex-col gap-0.5 px-2 py-1.5 cursor-pointer text-left border-b last:border-b-0 ${darkMode ? 'border-slate-700 hover:bg-slate-700' : 'border-gray-100 hover:bg-gray-100'}`}
-                      onClick={() => {
-                        const key = inst.key || `${inst.exchange}:${inst.tradingsymbol}`;
-                        setWatchlist((prev) => (prev.includes(key) ? prev : [...prev, key]));
-                        setSearchQuery('');
-                        setSearchSuggestions([]);
-                        setSearchSuggestionsTotal(0);
-                        setSearchSuggestionsOpen(false);
-                        setSymbol(key);
-                      }}
-                    >
-                      <span className="font-medium text-sm">
-                        {inst.zerodha_display_name || inst.tradingsymbol}
-                      </span>
-                      <span className={`text-xs ${darkMode ? 'text-slate-400' : 'text-gray-500'}`}>
-                        {inst.zerodha_expiry_label ? (
-                          <>
-                            <span className="font-medium">{inst.zerodha_expiry_label}</span>
-                            <span className={`ml-1.5 px-1.5 py-0.5 rounded text-[10px] ${darkMode ? 'bg-slate-600 text-slate-300' : 'bg-gray-200 text-gray-600'}`}>NFO</span>
-                          </>
-                        ) : (
-                          <>{inst.name || inst.tradingsymbol}{inst.segment_label ? ` · ${inst.segment_label}` : ` · ${inst.exchange}${inst.instrument_type ? ` · ${(inst.instrument_type === 'FUT' ? 'Future' : inst.instrument_type === 'CE' || inst.instrument_type === 'PE' ? 'Option' : inst.instrument_type === 'INDEX' ? 'Index' : inst.instrument_type === 'MF' ? 'MF' : inst.instrument_type)}` : ''}`}</>
-                        )}
-                      </span>
-                    </li>
-                  ))}
+                  {searchSuggestions.map((inst) => {
+                    const key = inst.key || `${inst.exchange}:${inst.tradingsymbol}`;
+                    const alreadyInWatchlist = watchlist.includes(key);
+                    const addToWatchlist = (e) => {
+                      e.stopPropagation();
+                      if (alreadyInWatchlist) return;
+                      setWatchlist((prev) => [...prev, key]);
+                      setSearchQuery('');
+                      setSearchSuggestions([]);
+                      setSearchSuggestionsTotal(0);
+                      setSearchSuggestionsOpen(false);
+                      setSymbol(key);
+                    };
+                    return (
+                      <li
+                        key={key}
+                        className={`flex items-center gap-2 px-2 py-1.5 text-left border-b last:border-b-0 ${darkMode ? 'border-slate-700 hover:bg-slate-700' : 'border-gray-100 hover:bg-gray-100'}`}
+                      >
+                        <div
+                          className="flex flex-col gap-0.5 min-w-0 flex-1 cursor-pointer py-0.5"
+                          onClick={() => {
+                            if (alreadyInWatchlist) {
+                              setSymbol(key);
+                              setSearchSuggestionsOpen(false);
+                            } else {
+                              setWatchlist((prev) => [...prev, key]);
+                              setSearchQuery('');
+                              setSearchSuggestions([]);
+                              setSearchSuggestionsTotal(0);
+                              setSearchSuggestionsOpen(false);
+                              setSymbol(key);
+                            }
+                          }}
+                        >
+                          <span className="font-medium text-sm">
+                            {inst.zerodha_display_name || inst.tradingsymbol}
+                          </span>
+                          <span className={`text-xs ${darkMode ? 'text-slate-400' : 'text-gray-500'}`}>
+                            {inst.zerodha_expiry_label ? (
+                              <>
+                                <span className="font-medium">{inst.zerodha_expiry_label}</span>
+                                <span className={`ml-1.5 px-1.5 py-0.5 rounded text-[10px] ${darkMode ? 'bg-slate-600 text-slate-300' : 'bg-gray-200 text-gray-600'}`}>NFO</span>
+                              </>
+                            ) : (
+                              <>{inst.name || inst.tradingsymbol}{inst.segment_label ? ` · ${inst.segment_label}` : ` · ${inst.exchange}${inst.instrument_type ? ` · ${(inst.instrument_type === 'FUT' ? 'Future' : inst.instrument_type === 'CE' || inst.instrument_type === 'PE' ? 'Option' : inst.instrument_type === 'INDEX' ? 'Index' : inst.instrument_type === 'MF' ? 'MF' : inst.instrument_type)}` : ''}`}</>
+                            )}
+                          </span>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={addToWatchlist}
+                          disabled={alreadyInWatchlist}
+                          className={`shrink-0 px-2 py-1 text-xs font-medium rounded touch-manipulation ${alreadyInWatchlist ? (darkMode ? 'bg-slate-600 text-slate-400 cursor-default' : 'bg-gray-200 text-gray-400 cursor-default') : 'bg-blue-600 hover:bg-blue-700 text-white'}`}
+                          title={alreadyInWatchlist ? 'In watchlist' : 'Add to watchlist'}
+                        >
+                          {alreadyInWatchlist ? 'Added' : '+ Add'}
+                        </button>
+                      </li>
+                    );
+                  })}
                 </ul>
                 {searchSuggestionsTotal > searchSuggestions.length && (
                   <button
@@ -1168,15 +1505,15 @@ export default function Dashboard({ user, onLogout, darkMode, onToggleDarkMode }
             )}
             <p className="mt-1 text-xs text-gray-500 dark:text-slate-500">Ctrl+K to search</p>
           </div>
-          <div className="px-2 pt-1 flex items-center justify-between gap-1">
-            <span className="text-xs font-semibold text-gray-700 dark:text-slate-300">{activeGroup?.name ?? 'Default'} ({watchlist.length}/250)</span>
-            <button type="button" onClick={addWatchlistGroup} className="text-xs text-blue-600 dark:text-blue-400 hover:underline shrink-0">+ New group</button>
+          <div className="px-2 pt-1 flex items-center justify-between gap-1 min-w-0">
+            <span className="text-xs font-semibold text-gray-700 dark:text-slate-300 truncate min-w-0">{activeGroup?.name ?? 'Default'} ({watchlist.length}/250)</span>
+            <button type="button" onClick={addWatchlistGroup} className="text-xs text-blue-600 dark:text-blue-400 hover:underline shrink-0 whitespace-nowrap">+ New group</button>
           </div>
-          <div className="px-2 flex items-center justify-between gap-1">
-            <span className="text-[11px] font-medium text-gray-500 dark:text-slate-500 uppercase tracking-wide">{activeGroup?.name ?? 'Default'} ({watchlist.length})</span>
-            {dataFeedLive && <span className="text-[10px] text-green-600 dark:text-green-400 font-medium">Live</span>}
-            {!dataFeedLive && watchlist.length > 0 && <span className="text-[10px] text-gray-500 dark:text-slate-400">Delayed</span>}
-            {quotesApiUnavailable && <span className="text-[10px] text-amber-600 dark:text-amber-400">Delayed</span>}
+          <div className="px-2 flex items-center justify-between gap-1 min-w-0">
+            <span className="text-[11px] font-medium text-gray-500 dark:text-slate-500 uppercase tracking-wide truncate min-w-0">{activeGroup?.name ?? 'Default'} ({watchlist.length})</span>
+            {dataFeedLive && <span className="text-[10px] text-green-600 dark:text-green-400 font-medium shrink-0 whitespace-nowrap">Live</span>}
+            {!dataFeedLive && watchlist.length > 0 && <span className="text-[10px] text-gray-500 dark:text-slate-400 shrink-0 whitespace-nowrap">Delayed</span>}
+            {quotesApiUnavailable && <span className="text-[10px] text-amber-600 dark:text-amber-400 shrink-0 whitespace-nowrap">Delayed</span>}
           </div>
           <ul className="flex-1 overflow-auto min-h-0 text-sm">
             {paginatedWatchlist.map((s) => {
@@ -1200,18 +1537,24 @@ export default function Dashboard({ user, onLogout, darkMode, onToggleDarkMode }
                 >
                   <div className="min-w-0 flex-1 flex items-center gap-1 cursor-pointer" onClick={() => setSymbol(s)}>
                   <div className="min-w-0 flex-1">
-                      <div className="font-medium truncate">{displaySymbol.replace(/\s w\s/g, ' ʷ ')}{ex !== 'NFO' && (s.includes('NIFTY') || s.includes('SENSEX')) ? ' INDEX' : ''}</div>
-                    <div className="flex items-center gap-2 text-xs">
-                        {watchlistShow.priceChange && (hasQuote ? <span className={change < 0 ? 'text-red-500' : 'text-green-500'}>{change >= 0 ? '+' : ''}{change}</span> : <span className={darkMode ? 'text-slate-500' : 'text-gray-400'}>—</span>)}
-                        {watchlistShow.priceChangePct && (hasQuote ? <span className={changePercent < 0 ? 'text-red-500' : 'text-green-500'}>({changePercent}%)</span> : <span className={darkMode ? 'text-slate-500' : 'text-gray-400'}>—</span>)}
-                        {watchlistShow.priceDirection && (hasQuote ? <span className={change < 0 ? 'text-red-500' : 'text-green-500'}>{change < 0 ? '▼' : '▲'}</span> : <span className={darkMode ? 'text-slate-500' : 'text-gray-400'}>—</span>)}
-                      <span className={darkMode ? 'text-slate-400' : 'text-gray-500'}>{lastPrice != null ? Number(lastPrice).toFixed(2) : '—'}</span>
+                      <div className="font-medium truncate" title={displaySymbol.replace(/\s w\s/g, ' ʷ ') + (ex !== 'NFO' && (s.includes('NIFTY') || s.includes('SENSEX')) ? ' INDEX' : '')}>{displaySymbol.replace(/\s w\s/g, ' ʷ ')}{ex !== 'NFO' && (s.includes('NIFTY') || s.includes('SENSEX')) ? ' INDEX' : ''}</div>
+                    <div className="flex items-center gap-2 text-xs mt-0.5">
+                        {hasQuote ? (
+                          <>
+                            {watchlistShow.priceChange && <span className={change < 0 ? 'text-red-500' : 'text-green-500'}>{change >= 0 ? '+' : ''}{change}</span>}
+                            {watchlistShow.priceChangePct && <span className={changePercent < 0 ? 'text-red-500' : 'text-green-500'}>({changePercent}%)</span>}
+                            {watchlistShow.priceDirection && <span className={change < 0 ? 'text-red-500' : 'text-green-500'}>{change < 0 ? '▼' : '▲'}</span>}
+                            <span className={darkMode ? 'text-slate-400' : 'text-gray-500'}>{lastPrice != null ? Number(lastPrice).toFixed(2) : '—'}</span>
+                          </>
+                        ) : (
+                          <span className={darkMode ? 'text-slate-500' : 'text-gray-400'}>—</span>
+                        )}
                     </div>
                   </div>
                   </div>
                   <div className="flex items-center gap-0.5 opacity-100 sm:opacity-0 sm:group-hover:opacity-100 flex-shrink-0" onClick={(e) => e.stopPropagation()}>
-                    <button type="button" onClick={() => { setSymbol(s); setOrderModalSide('BUY'); setOrderModalOpen(true); setMainNav('dashboard'); setChartFullScreen(false); setSidebarOpen(false); }} className="w-7 h-7 sm:w-8 sm:h-8 flex items-center justify-center rounded text-white font-semibold text-sm bg-blue-600 hover:bg-blue-700 touch-manipulation shrink-0" title="Buy">B</button>
-                    <button type="button" onClick={() => { setSymbol(s); setOrderModalSide('SELL'); setOrderModalOpen(true); setMainNav('dashboard'); setChartFullScreen(false); setSidebarOpen(false); }} className="w-7 h-7 sm:w-8 sm:h-8 flex items-center justify-center rounded text-white font-semibold text-sm bg-orange-500 hover:bg-orange-600 touch-manipulation shrink-0" title="Sell">S</button>
+                    <button type="button" onClick={() => { setSymbol(s); setOrderModalSide('BUY'); setOrderType('MARKET'); setOrderPrice(''); setOrderModalOpen(true); setMainNav('dashboard'); setChartFullScreen(false); setSidebarOpen(false); }} className="w-7 h-7 sm:w-8 sm:h-8 flex items-center justify-center rounded text-white font-semibold text-sm bg-blue-600 hover:bg-blue-700 touch-manipulation shrink-0" title="Buy">B</button>
+                    <button type="button" onClick={() => { setSymbol(s); setOrderModalSide('SELL'); setOrderType('MARKET'); setOrderPrice(''); setOrderModalOpen(true); setMainNav('dashboard'); setChartFullScreen(false); setSidebarOpen(false); }} className="w-7 h-7 sm:w-8 sm:h-8 flex items-center justify-center rounded text-white font-semibold text-sm bg-orange-500 hover:bg-orange-600 touch-manipulation shrink-0" title="Sell">S</button>
                     <button type="button" onClick={() => { setSymbol(s); setChartFullScreen(true); setWatchlistOptionsOpen(null); setMainNav('dashboard'); setSidebarOpen(false); }} className="w-7 h-7 sm:w-8 sm:h-8 flex items-center justify-center rounded border border-gray-300 dark:border-slate-600 bg-white dark:bg-slate-700 hover:bg-gray-100 dark:hover:bg-slate-600 touch-manipulation shrink-0" title="Chart">📈</button>
                     <div className="relative">
                       <button type="button" onClick={() => setWatchlistOptionsOpen(optionsOpen ? null : s)} className="w-7 h-7 sm:w-8 sm:h-8 flex items-center justify-center rounded border border-gray-300 dark:border-slate-600 bg-white dark:bg-slate-700 hover:bg-gray-100 dark:hover:bg-slate-600 touch-manipulation shrink-0 text-gray-700 dark:text-slate-200" title="Menu" aria-label="Options">☰</button>
@@ -1228,7 +1571,7 @@ export default function Dashboard({ user, onLogout, darkMode, onToggleDarkMode }
                         </div>
                       )}
                     </div>
-                    <button type="button" onClick={() => { setSymbol(s); setOrderModalSide('BUY'); setOrderModalOpen(true); setMainNav('dashboard'); setChartFullScreen(false); setSidebarOpen(false); }} className="w-7 h-7 sm:w-8 sm:h-8 flex items-center justify-center rounded text-white font-semibold text-lg leading-none bg-green-600 hover:bg-green-700 touch-manipulation shrink-0" title="Quick buy">+</button>
+                    <button type="button" onClick={() => { setSymbol(s); setOrderModalSide('BUY'); setOrderType('MARKET'); setOrderPrice(''); setOrderModalOpen(true); setMainNav('dashboard'); setChartFullScreen(false); setSidebarOpen(false); }} className="w-7 h-7 sm:w-8 sm:h-8 flex items-center justify-center rounded text-white font-semibold text-lg leading-none bg-green-600 hover:bg-green-700 touch-manipulation shrink-0" title="Quick buy">+</button>
                   </div>
                 </li>
               );
@@ -1440,6 +1783,9 @@ export default function Dashboard({ user, onLogout, darkMode, onToggleDarkMode }
                 const isNfo = ex === 'NFO';
                 const isOpt = /(CE|PE)$/.test(String(trSymbol).toUpperCase());
                 const optionsRequireLimit = isNfo && isOpt;
+                const isMarket = orderType === 'MARKET';
+                const quoteKey = symbol.includes(':') ? symbol.split(':')[1] : (symbol === 'NIFTY 50' ? 'NIFTY 50' : symbol === 'NIFTY BANK' ? 'NIFTY BANK' : symbol);
+                const ltp = quotes[quoteKey]?.lastPrice ?? quotes[quoteKey]?.value ?? null;
                 return (
                   <aside ref={orderPanelRef} className={`w-full lg:w-72 shrink-0 flex flex-col border-t lg:border-t-0 border-l min-w-0 overflow-hidden ${darkMode ? 'border-slate-700 bg-slate-800' : 'border-gray-200 bg-white'}`}>
                     <div className="p-3 border-b border-gray-200 dark:border-slate-700 min-w-0">
@@ -1461,28 +1807,38 @@ export default function Dashboard({ user, onLogout, darkMode, onToggleDarkMode }
                         <label className="block text-xs font-medium text-gray-500 dark:text-slate-400 mb-1">Quantity</label>
                         <input type="number" placeholder="0" value={quantity} onChange={(e) => setQuantity(e.target.value)} min={1} className={`w-full min-w-0 rounded border px-2.5 py-2.5 sm:py-2 text-sm touch-manipulation box-border ${darkMode ? 'border-slate-600 bg-slate-700 text-slate-100' : 'border-gray-300 bg-white text-gray-900'}`} />
                       </div>
-                      {optionsRequireLimit && <p className="text-xs text-amber-600 dark:text-amber-400">Options: LIMIT order & price required</p>}
-                      <div className="grid grid-cols-2 gap-2 min-w-0">
-                        <div className="min-w-0">
-                          <label className="block text-xs font-medium text-gray-500 dark:text-slate-400 mb-1">Type</label>
-                          <select value={orderType} onChange={(e) => setOrderType(e.target.value)} disabled={optionsRequireLimit} className={`w-full min-w-0 rounded border px-2 py-2 text-sm box-border ${darkMode ? 'border-slate-600 bg-slate-700 text-slate-100' : 'border-gray-300 bg-white text-gray-900'}`}>
-                            <option value="MARKET">Market</option>
-                            <option value="LIMIT">Limit</option>
-                          </select>
-                        </div>
-                        <div className="min-w-0">
-                          <label className="block text-xs font-medium text-gray-500 dark:text-slate-400 mb-1">Product</label>
-                          <select value={orderProduct} onChange={(e) => setOrderProduct(e.target.value)} className={`w-full min-w-0 rounded border px-2 py-2 text-sm box-border ${darkMode ? 'border-slate-600 bg-slate-700 text-slate-100' : 'border-gray-300 bg-white text-gray-900'}`}>
-                            {isNfo ? (<><option value="MIS">MIS</option><option value="NRML">NRML</option></>) : (<><option value="CNC">CNC</option><option value="MIS">MIS</option><option value="NRML">NRML</option></>)}
-                          </select>
-                        </div>
+                      {/* Price — Market price (striped, 0, pencil) first; click pencil → Price input with clear (X) and arrows */}
+                      <div className="min-w-0 space-y-1">
+                        <label className="text-xs font-medium text-gray-500 dark:text-slate-400">{isMarket ? 'Market price' : 'Price'}</label>
+                        {isMarket ? (
+                          <div className={`flex items-center justify-between rounded border px-2.5 py-2 text-sm text-gray-500 dark:text-slate-400 ${darkMode ? 'border-slate-600' : 'border-gray-300'}`} style={darkMode ? { background: 'repeating-linear-gradient(-45deg, rgb(30 41 59), rgb(30 41 59) 4px, rgba(255,255,255,0.04) 4px, rgba(255,255,255,0.04) 8px)' } : { background: 'repeating-linear-gradient(-45deg, #f9fafb, #f9fafb 4px, rgba(0,0,0,0.04) 4px, rgba(0,0,0,0.04) 8px)' }}>
+                            <span>0</span>
+                            <button type="button" onClick={() => setOrderType('LIMIT')} className="p-1 rounded bg-gray-200/80 dark:bg-slate-600/80 text-gray-500 dark:text-slate-400 hover:bg-gray-300 dark:hover:bg-slate-500" title="Set your price" aria-label="Set your price">
+                              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7" /><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z" /></svg>
+                            </button>
+                          </div>
+                        ) : (
+                          <div className="flex items-center rounded border border-gray-300 dark:border-slate-600 overflow-hidden bg-white dark:bg-slate-800">
+                            <input type="number" step="0.05" min="0" placeholder={ltp != null ? String(ltp) : '0'} value={orderPrice} onChange={(e) => setOrderPrice(e.target.value)} className="flex-1 min-w-0 px-2.5 py-2 text-sm text-gray-900 dark:text-slate-100 bg-transparent border-0 outline-none focus:ring-0" />
+                            {orderPrice && <button type="button" onClick={() => setOrderPrice('')} className="p-1.5 text-orange-500 hover:text-orange-600 dark:text-orange-400 shrink-0" title="Clear price" aria-label="Clear">×</button>}
+                            <div className="flex flex-col border-l border-gray-200 dark:border-slate-600 shrink-0">
+                              <button type="button" onClick={() => setOrderPrice(String((Number(orderPrice) || 0) + 0.05))} className="px-1.5 py-0.5 text-gray-400 hover:text-gray-700 dark:hover:text-slate-200 hover:bg-gray-100 dark:hover:bg-slate-700">▲</button>
+                              <button type="button" onClick={() => setOrderPrice(String(Math.max(0, (Number(orderPrice) || 0) - 0.05)))} className="px-1.5 py-0.5 text-gray-400 hover:text-gray-700 dark:hover:text-slate-200 hover:bg-gray-100 dark:hover:bg-slate-700 border-t border-gray-200 dark:border-slate-600">▼</button>
+                            </div>
+                            {!optionsRequireLimit && (
+                              <button type="button" onClick={() => setOrderType('MARKET')} className="p-1 border-l border-gray-200 dark:border-slate-600 text-gray-400 hover:text-gray-600 dark:hover:text-slate-200 shrink-0" title="Back to market price" aria-label="Back to market"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7" /><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z" /></svg></button>
+                            )}
+                          </div>
+                        )}
+                        {isMarket && optionsRequireLimit && <p className="text-xs text-gray-500 dark:text-slate-400">Options need limit price — tap pencil to set</p>}
+                        {!isMarket && optionsRequireLimit && !orderPrice && <p className="text-xs text-gray-500 dark:text-slate-400">Enter limit price for options</p>}
                       </div>
-                      {(orderType === 'LIMIT' || optionsRequireLimit) && (
-                        <div>
-                          <label className="block text-xs font-medium text-gray-500 dark:text-slate-400 mb-1">Price (₹)</label>
-                          <input type="number" step="0.05" placeholder="0.00" value={orderPrice} onChange={(e) => setOrderPrice(e.target.value)} className={`w-full rounded border px-2.5 py-2 text-sm ${darkMode ? 'border-slate-600 bg-slate-700 text-slate-100' : 'border-gray-300 bg-white text-gray-900'}`} />
-                        </div>
-                      )}
+                      <div className="min-w-0">
+                        <label className="block text-xs font-medium text-gray-500 dark:text-slate-400 mb-1">Product</label>
+                        <select value={orderProduct} onChange={(e) => setOrderProduct(e.target.value)} className={`w-full min-w-0 rounded border px-2 py-2 text-sm box-border ${darkMode ? 'border-slate-600 bg-slate-700 text-slate-100' : 'border-gray-300 bg-white text-gray-900'}`}>
+                          {isNfo ? (<><option value="MIS">MIS</option><option value="NRML">NRML</option></>) : (<><option value="CNC">CNC</option><option value="MIS">MIS</option><option value="NRML">NRML</option></>)}
+                        </select>
+                      </div>
                       <div className={`grid gap-2 mt-auto pt-2 min-w-0 ${orderSide ? 'grid-cols-1' : 'grid-cols-2'}`}>
                         {(orderSide === null || orderSide === 'BUY') && (
                           <button type="button" onClick={() => { placeOrder('BUY'); setOrderSide(null); }} disabled={kiteOrderLoading || (optionsRequireLimit && !orderPrice)} className="rounded py-3 sm:py-2.5 text-sm font-medium text-white bg-green-600 hover:bg-green-700 disabled:opacity-50 disabled:cursor-not-allowed touch-manipulation min-h-[44px] sm:min-h-0 min-w-0">Buy</button>
@@ -1547,6 +1903,9 @@ export default function Dashboard({ user, onLogout, darkMode, onToggleDarkMode }
                 const isNfo = ex === 'NFO';
                 const isOpt = /(CE|PE)$/.test(String(trSymbol).toUpperCase());
                 const optionsRequireLimit = isNfo && isOpt;
+                const isMarket = orderType === 'MARKET';
+                const quoteKey = symbol.includes(':') ? symbol.split(':')[1] : (symbol === 'NIFTY 50' ? 'NIFTY 50' : symbol === 'NIFTY BANK' ? 'NIFTY BANK' : symbol);
+                const ltp = quotes[quoteKey]?.lastPrice ?? quotes[quoteKey]?.value ?? null;
                 return (
                   <aside className={`w-full lg:w-72 shrink-0 flex flex-col border-t lg:border-t-0 border-l min-w-0 overflow-hidden ${darkMode ? 'border-slate-700 bg-slate-800' : 'border-gray-200 bg-white'}`}>
                     <div className="p-3 border-b border-gray-200 dark:border-slate-700 min-w-0">
@@ -1568,28 +1927,38 @@ export default function Dashboard({ user, onLogout, darkMode, onToggleDarkMode }
                         <label className="block text-xs font-medium text-gray-500 dark:text-slate-400 mb-1">Quantity</label>
                         <input type="number" placeholder="0" value={quantity} onChange={(e) => setQuantity(e.target.value)} min={1} className={`w-full min-w-0 rounded border px-2.5 py-2.5 sm:py-2 text-sm touch-manipulation box-border ${darkMode ? 'border-slate-600 bg-slate-700 text-slate-100' : 'border-gray-300 bg-white text-gray-900'}`} />
                       </div>
-                      {optionsRequireLimit && <p className="text-xs text-amber-600 dark:text-amber-400">Options: LIMIT order & price required</p>}
-                      <div className="grid grid-cols-2 gap-2 min-w-0">
-                        <div className="min-w-0">
-                          <label className="block text-xs font-medium text-gray-500 dark:text-slate-400 mb-1">Type</label>
-                          <select value={orderType} onChange={(e) => setOrderType(e.target.value)} disabled={optionsRequireLimit} className={`w-full min-w-0 rounded border px-2 py-2 text-sm box-border ${darkMode ? 'border-slate-600 bg-slate-700 text-slate-100' : 'border-gray-300 bg-white text-gray-900'}`}>
-                            <option value="MARKET">Market</option>
-                            <option value="LIMIT">Limit</option>
-                          </select>
-                        </div>
-                        <div className="min-w-0">
-                          <label className="block text-xs font-medium text-gray-500 dark:text-slate-400 mb-1">Product</label>
-                          <select value={orderProduct} onChange={(e) => setOrderProduct(e.target.value)} className={`w-full min-w-0 rounded border px-2 py-2 text-sm box-border ${darkMode ? 'border-slate-600 bg-slate-700 text-slate-100' : 'border-gray-300 bg-white text-gray-900'}`}>
-                            {isNfo ? (<><option value="MIS">MIS</option><option value="NRML">NRML</option></>) : (<><option value="CNC">CNC</option><option value="MIS">MIS</option><option value="NRML">NRML</option></>)}
-                          </select>
-                        </div>
+                      {/* Price — Market price (striped, 0, pencil) first; click pencil → Price input with clear (X) and arrows */}
+                      <div className="min-w-0 space-y-1">
+                        <label className="text-xs font-medium text-gray-500 dark:text-slate-400">{isMarket ? 'Market price' : 'Price'}</label>
+                        {isMarket ? (
+                          <div className={`flex items-center justify-between rounded border px-2.5 py-2 text-sm text-gray-500 dark:text-slate-400 ${darkMode ? 'border-slate-600' : 'border-gray-300'}`} style={darkMode ? { background: 'repeating-linear-gradient(-45deg, rgb(30 41 59), rgb(30 41 59) 4px, rgba(255,255,255,0.04) 4px, rgba(255,255,255,0.04) 8px)' } : { background: 'repeating-linear-gradient(-45deg, #f9fafb, #f9fafb 4px, rgba(0,0,0,0.04) 4px, rgba(0,0,0,0.04) 8px)' }}>
+                            <span>0</span>
+                            <button type="button" onClick={() => setOrderType('LIMIT')} className="p-1 rounded bg-gray-200/80 dark:bg-slate-600/80 text-gray-500 dark:text-slate-400 hover:bg-gray-300 dark:hover:bg-slate-500" title="Set your price" aria-label="Set your price">
+                              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7" /><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z" /></svg>
+                            </button>
+                          </div>
+                        ) : (
+                          <div className="flex items-center rounded border border-gray-300 dark:border-slate-600 overflow-hidden bg-white dark:bg-slate-800">
+                            <input type="number" step="0.05" min="0" placeholder={ltp != null ? String(ltp) : '0'} value={orderPrice} onChange={(e) => setOrderPrice(e.target.value)} className="flex-1 min-w-0 px-2.5 py-2 text-sm text-gray-900 dark:text-slate-100 bg-transparent border-0 outline-none focus:ring-0" />
+                            {orderPrice && <button type="button" onClick={() => setOrderPrice('')} className="p-1.5 text-orange-500 hover:text-orange-600 dark:text-orange-400 shrink-0" title="Clear price" aria-label="Clear">×</button>}
+                            <div className="flex flex-col border-l border-gray-200 dark:border-slate-600 shrink-0">
+                              <button type="button" onClick={() => setOrderPrice(String((Number(orderPrice) || 0) + 0.05))} className="px-1.5 py-0.5 text-gray-400 hover:text-gray-700 dark:hover:text-slate-200 hover:bg-gray-100 dark:hover:bg-slate-700">▲</button>
+                              <button type="button" onClick={() => setOrderPrice(String(Math.max(0, (Number(orderPrice) || 0) - 0.05)))} className="px-1.5 py-0.5 text-gray-400 hover:text-gray-700 dark:hover:text-slate-200 hover:bg-gray-100 dark:hover:bg-slate-700 border-t border-gray-200 dark:border-slate-600">▼</button>
+                            </div>
+                            {!optionsRequireLimit && (
+                              <button type="button" onClick={() => setOrderType('MARKET')} className="p-1 border-l border-gray-200 dark:border-slate-600 text-gray-400 hover:text-gray-600 dark:hover:text-slate-200 shrink-0" title="Back to market price" aria-label="Back to market"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7" /><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z" /></svg></button>
+                            )}
+                          </div>
+                        )}
+                        {isMarket && optionsRequireLimit && <p className="text-xs text-gray-500 dark:text-slate-400">Options need limit price — tap pencil to set</p>}
+                        {!isMarket && optionsRequireLimit && !orderPrice && <p className="text-xs text-gray-500 dark:text-slate-400">Enter limit price for options</p>}
                       </div>
-                      {(orderType === 'LIMIT' || optionsRequireLimit) && (
-                        <div>
-                          <label className="block text-xs font-medium text-gray-500 dark:text-slate-400 mb-1">Price (₹)</label>
-                          <input type="number" step="0.05" placeholder="0.00" value={orderPrice} onChange={(e) => setOrderPrice(e.target.value)} className={`w-full rounded border px-2.5 py-2 text-sm ${darkMode ? 'border-slate-600 bg-slate-700 text-slate-100' : 'border-gray-300 bg-white text-gray-900'}`} />
-                        </div>
-                      )}
+                      <div className="min-w-0">
+                        <label className="block text-xs font-medium text-gray-500 dark:text-slate-400 mb-1">Product</label>
+                        <select value={orderProduct} onChange={(e) => setOrderProduct(e.target.value)} className={`w-full min-w-0 rounded border px-2 py-2 text-sm box-border ${darkMode ? 'border-slate-600 bg-slate-700 text-slate-100' : 'border-gray-300 bg-white text-gray-900'}`}>
+                          {isNfo ? (<><option value="MIS">MIS</option><option value="NRML">NRML</option></>) : (<><option value="CNC">CNC</option><option value="MIS">MIS</option><option value="NRML">NRML</option></>)}
+                        </select>
+                      </div>
                       <div className="grid grid-cols-2 gap-2 mt-auto pt-2 min-w-0">
                         <button type="button" onClick={() => placeOrder('BUY')} disabled={kiteOrderLoading || (optionsRequireLimit && !orderPrice)} className="rounded py-3 sm:py-2.5 text-sm font-medium text-white bg-green-600 hover:bg-green-700 disabled:opacity-50 disabled:cursor-not-allowed touch-manipulation min-h-[44px] sm:min-h-0 min-w-0">Buy</button>
                         <button type="button" onClick={() => placeOrder('SELL')} disabled={kiteOrderLoading || (optionsRequireLimit && !orderPrice)} className="rounded py-3 sm:py-2.5 text-sm font-medium text-white bg-red-600 hover:bg-red-700 disabled:opacity-50 disabled:cursor-not-allowed touch-manipulation min-h-[44px] sm:min-h-0 min-w-0">Sell</button>
@@ -1708,6 +2077,10 @@ export default function Dashboard({ user, onLogout, darkMode, onToggleDarkMode }
                 </div>
               </div>
             </div>
+          )}
+
+          {mainNav === 'autotrading' && (
+            <AutoTrading darkMode={darkMode} />
           )}
 
           {mainNav === 'funds' && (
