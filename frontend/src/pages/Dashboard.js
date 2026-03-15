@@ -162,11 +162,8 @@ export default function Dashboard({ user, onLogout, darkMode, onToggleDarkMode }
   const [quotes, setQuotes] = useState({});
   const [dataFeedLive, setDataFeedLive] = useState(false); // true when TrueData WebSocket connected (live tick feed)
   const [quotesApiUnavailable, setQuotesApiUnavailable] = useState(false); // true when backend returns 503 (Kite not configured)
-  const [kiteRefreshMessage, setKiteRefreshMessage] = useState(null); // 'success' | error string after redirect from Kite callback
-  const [kiteAutoConnecting, setKiteAutoConnecting] = useState(false); // true when redirecting to Kite to enable live data (no manual "Connect Kite" step)
-  const [kiteSetupOpen, setKiteSetupOpen] = useState(false); // one-time setup: paste API key/secret, no env vars needed
-  const [kiteRedirectUrl, setKiteRedirectUrl] = useState(''); // URL to add in Kite developer console (fallback: API_URL + /api/kite/callback)
-  const kiteRedirectUrlDisplay = kiteRedirectUrl || `${API_URL.replace(/\/$/, '')}/api/kite/callback`;
+  const [kiteSetupOpen, setKiteSetupOpen] = useState(false); // one-time setup (modal never opened — Zerodha not used)
+  const kiteRedirectUrlDisplay = `${API_URL.replace(/\/$/, '')}/api/kite/callback`;
   const [kiteSetupApiKey, setKiteSetupApiKey] = useState('');
   const [kiteSetupApiSecret, setKiteSetupApiSecret] = useState('');
   const [kiteSetupSaving, setKiteSetupSaving] = useState(false);
@@ -401,21 +398,10 @@ export default function Dashboard({ user, onLogout, darkMode, onToggleDarkMode }
     setQuotes((prev) => ({ ...prev, ...newQuotes }));
   }
 
-  // After Kite login redirect: show success/error and clean URL
+  // Clean Kite callback params from URL if user lands with them (Zerodha not used for market data)
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
-    const refreshed = params.get('kite_refreshed');
-    const err = params.get('kite_error');
-    if (refreshed === '1') {
-      setKiteRefreshMessage('success');
-      setQuotesApiUnavailable(false);
-      kiteRedirectDoneRef.current = false; // allow future auto-redirect if token is lost
-      window.history.replaceState({}, '', window.location.pathname);
-      const t = setTimeout(() => setKiteRefreshMessage(null), 5000);
-      return () => clearTimeout(t);
-    }
-    if (err) {
-      setKiteRefreshMessage(decodeURIComponent(err));
+    if (params.get('kite_refreshed') || params.get('kite_error')) {
       window.history.replaceState({}, '', window.location.pathname);
     }
   }, []);
