@@ -160,7 +160,6 @@ export default function Dashboard({ user, onLogout, darkMode, onToggleDarkMode }
   const [mainNav, setMainNav] = useState('dashboard');
   const [indices, setIndices] = useState([]);
   const [quotes, setQuotes] = useState({});
-  const [quotesFromLiveApi, setQuotesFromLiveApi] = useState(false); // true when last successful quotes response had real data
   const [dataFeedLive, setDataFeedLive] = useState(false); // true when TrueData WebSocket connected (live tick feed)
   const [quotesApiUnavailable, setQuotesApiUnavailable] = useState(false); // true when backend returns 503 (Kite not configured)
   const [kiteRefreshMessage, setKiteRefreshMessage] = useState(null); // 'success' | error string after redirect from Kite callback
@@ -395,7 +394,6 @@ export default function Dashboard({ user, onLogout, darkMode, onToggleDarkMode }
     if (!json?.data || !Array.isArray(json.data)) return;
     const data = json.data;
     setQuotesApiUnavailable(false);
-    setQuotesFromLiveApi(data.length > 0);
     setIndices(data.filter((q) => INDEX_NAMES.includes(q.name)));
     const newQuotes = Object.fromEntries(
       data.map((q) => [q.name, { lastPrice: q.value, change: q.change, changePercent: q.changePercent }])
@@ -465,7 +463,6 @@ export default function Dashboard({ user, onLogout, darkMode, onToggleDarkMode }
       .then((res) => {
         if (res.status === 503) {
           setQuotesApiUnavailable(true);
-          setQuotesFromLiveApi(false);
           return res.json().then(() => { throw new Error('Quotes unavailable'); });
         }
         if (!res.ok) throw new Error('Failed to fetch quotes');
