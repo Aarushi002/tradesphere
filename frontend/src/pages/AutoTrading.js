@@ -60,7 +60,7 @@ export default function AutoTrading({ darkMode }) {
   const wsRef = useRef(null);
   const reconnectRef = useRef(null);
 
-  const { mode, connector, live, error: statusError, refetch: refetchStatus } = useTradingStatus();
+  const { connector, live, error: statusError, refetch: refetchStatus } = useTradingStatus();
   const { data: positionsData, loading: positionsLoading, error: positionsError, refetch: refetchPositions } = useTradingApi('/api/positions', segmentFilter || undefined);
   const { data: ordersData, loading: ordersLoading, error: ordersError, refetch: refetchOrders } = useTradingApi('/api/orders', segmentFilter || undefined, 200);
   const { data: closedData, loading: closedLoading, error: closedError, refetch: refetchClosed } = useTradingApi('/api/closed', segmentFilter || undefined, 500);
