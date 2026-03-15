@@ -420,35 +420,7 @@ export default function Dashboard({ user, onLogout, darkMode, onToggleDarkMode }
     }
   }, []);
 
-  // Auto-connect Kite for live data: if not configured show one-time setup; else capture frontend URL and redirect to Kite
-  useEffect(() => {
-    if (!getToken() || kiteRedirectDoneRef.current) return;
-    fetch(`${API_URL}/api/kite/status`)
-      .then((res) => res.ok ? res.json() : Promise.reject())
-      .then((data) => {
-        if (data.redirectUrlToAddInKite) setKiteRedirectUrl(data.redirectUrlToAddInKite);
-        if (!data.configured) {
-          setKiteSetupOpen(true);
-          return;
-        }
-        if (!data.hasSession) {
-          kiteRedirectDoneRef.current = true;
-          setKiteAutoConnecting(true);
-          // Auto-capture frontend URL so backend knows where to redirect after Kite login (no FRONTEND_URL env needed)
-          const origin = window.location.origin;
-          fetch(`${API_URL}/api/kite/set-redirect-origin`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ origin }),
-          })
-            .catch(() => {})
-            .finally(() => {
-              window.location.href = `${API_URL}/api/kite/login?for=market&redirect_origin=${encodeURIComponent(origin)}`;
-            });
-        }
-      })
-      .catch(() => {});
-  }, []);
+  // Kite/Zerodha integration disabled — market data uses Yahoo/TrueData only; no redirect to Zerodha
 
   useEffect(() => {
     const symbols = [...INDEX_NAMES];
@@ -593,11 +565,9 @@ export default function Dashboard({ user, onLogout, darkMode, onToggleDarkMode }
         const msg = String(err?.message || '');
         const isKiteAuth = /api_key|access_token|authentication failed/i.test(msg);
         if (isKiteAuth) setQuotesApiUnavailable(true);
-        setChartError(err?.status === 503 || /market data unavailable|link your zerodha|kite session/i.test(msg)
-          ? 'Market data unavailable. Administrator: connect Kite once to enable live charts for everyone.'
-          : isKiteAuth
-            ? 'Live data requires Kite to be connected. Click "Enable live data" below.'
-            : (msg || 'Could not load chart. Connect Kite for real data.'));
+        setChartError(err?.status === 503 || /market data unavailable/i.test(msg)
+          ? 'Market data temporarily unavailable. Try again in a moment.'
+          : (msg || 'Could not load chart. Try another symbol or time range.'));
       })
       .finally(() => setChartLoading(false));
   }, [symbol, chartRange, chartRefreshTick]);
@@ -767,8 +737,8 @@ export default function Dashboard({ user, onLogout, darkMode, onToggleDarkMode }
             {!dataFeedLive && indices.length > 0 && (
               <span className="text-[10px] sm:text-xs text-gray-500 dark:text-slate-400 shrink-0" title="Free feed, typically 15–20 min delayed">Delayed (~15 min)</span>
             )}
-            {quotesApiUnavailable && !kiteAutoConnecting && (
-              <span className="text-[10px] sm:text-xs text-amber-600 dark:text-amber-400 shrink-0" title="Live data is being set up">Enabling…</span>
+            {quotesApiUnavailable && (
+              <span className="text-[10px] sm:text-xs text-amber-600 dark:text-amber-400 shrink-0" title="Prices may be delayed">Delayed</span>
             )}
             {indices.length > 0 ? indices.map((idx) => (
               <div key={idx.name} className="flex items-center gap-1 text-xs shrink-0 whitespace-nowrap">
@@ -778,8 +748,8 @@ export default function Dashboard({ user, onLogout, darkMode, onToggleDarkMode }
                 {idx.change >= 0 ? '+' : ''}{idx.change} ({idx.changePercent}%)
               </span>
             </div>
-            )) : quotesApiUnavailable && !kiteAutoConnecting ? (
-              <span className="text-xs text-amber-600 dark:text-amber-400 shrink-0">Enabling live indices…</span>
+            )) : quotesApiUnavailable ? (
+              <span className="text-xs text-amber-600 dark:text-amber-400 shrink-0">Delayed</span>
             ) : null}
         </div>
           <div className="hidden lg:flex items-center gap-0.5 shrink-0">
@@ -1010,17 +980,7 @@ export default function Dashboard({ user, onLogout, darkMode, onToggleDarkMode }
           <button type="button" onClick={() => fetchPortfolio()} className="ml-2 font-medium underline touch-manipulation">Retry</button>
         </div>
       )}
-      {kiteRefreshMessage === 'success' && (
-        <div className="bg-green-50 dark:bg-green-900/20 border-b border-green-200 dark:border-green-800 px-3 sm:px-4 py-2 text-xs sm:text-sm text-green-800 dark:text-green-200">
-          Kite session refreshed. Live data should appear shortly.
-        </div>
-      )}
-      {kiteRefreshMessage && kiteRefreshMessage !== 'success' && (
-        <div className="bg-amber-50 dark:bg-amber-900/30 border-b border-amber-200 dark:border-amber-800 px-3 sm:px-4 py-2 text-xs sm:text-sm text-amber-800 dark:text-amber-200">
-          Kite login failed: {kiteRefreshMessage}
-        </div>
-      )}
-      {/* One-time Kite setup: open console, copy URL, paste key/secret — maximum automation (redirect URL must be added manually in Kite; no API exists) */}
+      {/* Kite setup modal kept in DOM but never opened — Zerodha not used for market data */}
       {kiteSetupOpen && (
         <div className="fixed inset-0 z-[110] flex items-center justify-center p-4 overflow-y-auto">
           <div className="absolute inset-0 bg-black/50" onClick={() => setKiteSetupOpen(false)} aria-hidden="true" />
@@ -1088,19 +1048,9 @@ export default function Dashboard({ user, onLogout, darkMode, onToggleDarkMode }
           </div>
         </div>
       )}
-      {kiteAutoConnecting && (
+      {quotesApiUnavailable && !backendDown && (
         <div className="bg-sky-50 dark:bg-sky-900/20 border-b border-sky-200 dark:border-sky-800 px-3 sm:px-4 py-2 text-xs sm:text-sm text-sky-800 dark:text-sky-200">
-          Enabling live data…
-        </div>
-      )}
-      {quotesApiUnavailable && !backendDown && !kiteAutoConnecting && (
-        <div className="bg-sky-50 dark:bg-sky-900/20 border-b border-sky-200 dark:border-sky-800 px-3 sm:px-4 py-2 text-xs sm:text-sm text-sky-800 dark:text-sky-200">
-          <strong>Paper trading</strong> — Live prices for practice. {kiteRefreshMessage ? (
-            <>Kite login failed. <a href={`${API_URL}/api/kite/login?for=market`} className="font-semibold underline hover:no-underline">Try again</a></>
-          ) : (
-            <>Enabling live data…</>
-          )}{' '}
-          <button type="button" onClick={() => { setKiteSetupOpen(true); if (!kiteRedirectUrl) fetch(`${API_URL}/api/kite/setup`).then((r) => r.json()).then((d) => d.redirectUrlToAddInKite && setKiteRedirectUrl(d.redirectUrlToAddInKite)); }} className="font-semibold underline hover:no-underline">Setup Kite</button>
+          <strong>Paper trading</strong> — Prices may be delayed. Connect TrueData (when available) for live data.
         </div>
       )}
       {error && !backendDown && (
@@ -1241,7 +1191,7 @@ export default function Dashboard({ user, onLogout, darkMode, onToggleDarkMode }
             <span className="text-[11px] font-medium text-gray-500 dark:text-slate-500 uppercase tracking-wide">{activeGroup?.name ?? 'Default'} ({watchlist.length})</span>
             {dataFeedLive && <span className="text-[10px] text-green-600 dark:text-green-400 font-medium">Live</span>}
             {!dataFeedLive && watchlist.length > 0 && <span className="text-[10px] text-gray-500 dark:text-slate-400">Delayed</span>}
-            {quotesApiUnavailable && !kiteAutoConnecting && <span className="text-[10px] text-amber-600 dark:text-amber-400">Enabling…</span>}
+            {quotesApiUnavailable && <span className="text-[10px] text-amber-600 dark:text-amber-400">Delayed</span>}
           </div>
           <ul className="flex-1 overflow-auto min-h-0 text-sm">
             {paginatedWatchlist.map((s) => {
@@ -1359,11 +1309,6 @@ export default function Dashboard({ user, onLogout, darkMode, onToggleDarkMode }
                     {!chartLoading && candles.length === 0 && chartError ? (
                       <div className={`absolute inset-0 flex flex-col items-center justify-center gap-3 ${darkMode ? 'bg-slate-900 text-slate-300' : 'bg-gray-50 text-gray-600'}`}>
                         <p className="text-sm text-center px-4 max-w-md">{chartError}</p>
-                        {/live data|kite|api_key|access_token/i.test(chartError) && (
-                          <button type="button" onClick={() => { setKiteSetupOpen(true); if (!kiteRedirectUrl) fetch(`${API_URL}/api/kite/setup`).then((r) => r.json()).then((d) => d.redirectUrlToAddInKite && setKiteRedirectUrl(d.redirectUrlToAddInKite)); }} className="px-4 py-2 rounded-lg font-semibold text-white bg-blue-600 hover:bg-blue-700">
-                            Enable live data
-                          </button>
-                        )}
                       </div>
                     ) : (
                       <PriceChart data={candles} darkMode={darkMode} lastPrice={chartLtp} />
@@ -1485,11 +1430,6 @@ export default function Dashboard({ user, onLogout, darkMode, onToggleDarkMode }
                           {!chartLoading && candles.length === 0 && chartError ? (
                             <div className={`absolute inset-0 flex flex-col items-center justify-center gap-3 rounded ${darkMode ? 'bg-slate-900 text-slate-300' : 'bg-gray-100 text-gray-600'}`}>
                               <p className="text-sm text-center px-4 max-w-md">{chartError}</p>
-                              {/live data|kite|api_key|access_token/i.test(chartError) && (
-                                <button type="button" onClick={() => { setKiteSetupOpen(true); if (!kiteRedirectUrl) fetch(`${API_URL}/api/kite/setup`).then((r) => r.json()).then((d) => d.redirectUrlToAddInKite && setKiteRedirectUrl(d.redirectUrlToAddInKite)); }} className="px-4 py-2 rounded-lg font-semibold text-white bg-blue-600 hover:bg-blue-700">
-                                  Enable live data
-                                </button>
-                              )}
                             </div>
                           ) : (
                             <PriceChart data={candles} darkMode={darkMode} />

@@ -127,7 +127,7 @@ export default function Login({ onLogin }) {
     { left: '94%', height: 160, color: 'red', duration: 9.3, delay: -3.6 },
   ];
 
-  const LOGIN_TIMEOUT_MS = 25000; // 25s — backend on free tier can take ~1 min to wake
+  const LOGIN_TIMEOUT_MS = 60000; // 60s — free-tier backend (e.g. Render) can take 30–60s to wake
 
   async function handleSubmit(e) {
     e.preventDefault();
@@ -154,9 +154,9 @@ export default function Login({ onLogin }) {
       clearTimeout(timeoutId);
       const message =
         err.name === 'AbortError'
-          ? 'Server is taking too long. If the backend is on a free tier, it may be waking up — wait a minute and try again.'
+          ? 'Server is taking too long. If the backend is on a free tier, it may be waking up — wait a minute and click "Try again".'
           : err.message === 'Failed to fetch'
-            ? 'Cannot reach the server. Check that the backend URL is correct and the service is running.'
+            ? 'Cannot reach the server. If this is the deployed app, set REACT_APP_API_URL to your backend URL (e.g. https://tradesphere.onrender.com) in Vercel. Otherwise ensure the backend is running.'
             : err.message;
       setError(message);
     } finally {
@@ -272,7 +272,20 @@ export default function Login({ onLogin }) {
               className="w-full rounded-lg border border-slate-600 bg-slate-800/80 text-slate-100 px-3 py-2.5 sm:py-2 text-base focus:ring-2 focus:ring-sky-500 focus:border-sky-500"
             />
           </div>
-          {error && <p className="text-red-400 mb-3 text-sm leading-snug">{error}</p>}
+          {error && (
+            <div className="mb-3">
+              <p className="text-red-400 text-sm leading-snug">{error}</p>
+              {error.includes('waking up') && !loading && (
+                <button
+                  type="button"
+                  onClick={() => handleSubmit({ preventDefault: () => {} })}
+                  className="mt-2 text-sm font-medium text-sky-400 hover:text-sky-300 underline"
+                >
+                  Try again
+                </button>
+              )}
+            </div>
+          )}
           <button
             type="submit"
             disabled={loading}
