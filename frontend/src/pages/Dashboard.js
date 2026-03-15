@@ -1016,7 +1016,6 @@ export default function Dashboard({ user, onLogout, darkMode, onToggleDarkMode }
                     if (!res.ok) throw new Error(json.error || 'Failed to save');
                     setKiteSetupOpen(false);
                     kiteRedirectDoneRef.current = true;
-                    setKiteAutoConnecting(true);
                     const origin = window.location.origin;
                     fetch(`${API_URL}/api/kite/set-redirect-origin`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ origin }) }).catch(() => {});
                     window.location.href = `${API_URL}/api/kite/login?for=market&redirect_origin=${encodeURIComponent(origin)}`;
