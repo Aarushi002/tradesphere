@@ -2,9 +2,22 @@ import express from 'express';
 import { KiteConnect } from 'kiteconnect';
 import YahooFinance from 'yahoo-finance2';
 import { getMarketDataToken, getKiteApiKey } from '../src/lib/kiteToken.js';
+import { getCachedQuotes, isRealtimeConnected, getHistoricalBars, isRealtimeConfigured } from '../src/lib/realtimeData.js';
 
 const router = express.Router();
 const yahooFinance = new YahooFinance();
+
+// In-memory cache for Yahoo quotes to reduce latency and avoid hammering the free API (30s TTL)
+const YAHOO_QUOTES_TTL_MS = 30 * 1000;
+const yahooQuotesCache = new Map();
+function getCachedYahooQuotes(cacheKey) {
+  const entry = yahooQuotesCache.get(cacheKey);
+  if (!entry || Date.now() > entry.expiresAt) return null;
+  return entry.data;
+}
+function setCachedYahooQuotes(cacheKey, data) {
+  yahooQuotesCache.set(cacheKey, { data, expiresAt: Date.now() + YAHOO_QUOTES_TTL_MS });
+}
 
 // Map our symbol (or Kite key) to Yahoo Finance symbol for fallback when Kite is not connected.
 function toYahooSymbol(symbolOrKey) {
@@ -271,6 +284,11 @@ router.get('/instruments/search', async (req, res) => {
   }
 });
 
+// GET /api/market/realtime-status - whether live tick feed (TrueData) is connected
+router.get('/realtime-status', (req, res) => {
+  res.json({ live: isRealtimeConnected() });
+});
+
 // GET /api/market/quotes?symbols=NIFTY 50,SENSEX,RELIANCE,TCS,...
 // Real-time LTP and day change. Uses Kite when connected; falls back to Yahoo Finance so live data works without Kite.
 router.get('/quotes', async (req, res) => {
@@ -296,32 +314,19 @@ router.get('/quotes', async (req, res) => {
       return res.json({ data: [] });
     }
 
-    const hasKite = getKiteApiKey() && getMarketDataToken();
-    if (hasKite) {
-      const kc = getKiteForMarket();
-      const response = await kc.getQuote(keys);
-      const data = [];
-      const responseData = response && typeof response === 'object' && !Array.isArray(response) ? response : {};
-      for (const [kiteKey, q] of Object.entries(responseData)) {
-        const name = keyToName[kiteKey] || normalizeKiteKeyToName(kiteKey);
-        const lastPrice = Number(q.last_price);
-        if (lastPrice === undefined || lastPrice === null || Number.isNaN(lastPrice)) continue;
-        const ohlc = q.ohlc || {};
-        const prevClose = Number(ohlc.close);
-        let netChange = Number(q.net_change);
-        if (!Number.isFinite(netChange) && Number.isFinite(prevClose)) netChange = lastPrice - prevClose;
-        const changePercent = prevClose && prevClose !== 0 ? (netChange / prevClose) * 100 : 0;
-        data.push({
-          name,
-          value: lastPrice,
-          change: Math.round(netChange * 100) / 100,
-          changePercent: Math.round(changePercent * 100) / 100,
-        });
+    const displayNames = keys.map((k) => keyToName[k] || normalizeKiteKeyToName(k)).filter(Boolean);
+    if (isRealtimeConnected() && displayNames.length > 0) {
+      const cached = getCachedQuotes(displayNames);
+      if (cached.length > 0) {
+        return res.json({ data: cached });
       }
-      return res.json({ data });
     }
 
-    // Fallback: Yahoo Finance so dashboard shows real data without Kite
+    // Fallback: Yahoo Finance (delayed ~15–20 min). Cache 30s for minimal latency.
+    const cacheKey = [...keys].sort().join(',');
+    const cached = getCachedYahooQuotes(cacheKey);
+    if (cached) return res.json({ data: cached });
+
     const yahooSymbols = keys.map((k) => toYahooSymbol(k)).filter(Boolean);
     if (yahooSymbols.length === 0) return res.json({ data: [] });
     const quotes = await yahooFinance.quote(yahooSymbols).catch(() => []);
@@ -356,7 +361,10 @@ router.get('/quotes', async (req, res) => {
         changePercent: Math.round(changePercent * 100) / 100,
       });
     }
-    if (data.length > 0) console.log('[quotes] Yahoo fallback returned', data.length, 'instruments');
+    if (data.length > 0) {
+      setCachedYahooQuotes(cacheKey, data);
+      console.log('[quotes] Yahoo returned', data.length, 'instruments');
+    }
     res.json({ data });
   } catch (err) {
     console.error('Error fetching quotes', err?.message || err);
@@ -561,35 +569,20 @@ router.get('/option-chain', async (req, res) => {
 });
 
 // GET /api/market/candles?symbol=RELIANCE&range=6d  (range: 1d, 6d, 14d, 52w, ytd, 1m, 3m)
-// Uses Kite when connected; falls back to Yahoo Finance for real chart data without Kite.
+// Uses TrueData (live) when configured, else Yahoo Finance.
 router.get('/candles', async (req, res) => {
   try {
     const { symbol: rawSymbol = 'NIFTY50', range = '6d' } = req.query;
     const symbol = rawSymbol.toString().trim() || 'NIFTY50';
     const { from, to, interval } = getRangeParams(range);
 
-    const hasKite = getKiteApiKey() && getMarketDataToken();
-    if (hasKite) {
-      const token = await getInstrumentToken(symbol);
-    if (!token) {
-        return res.status(400).json({ error: 'Unsupported symbol. Add to watchlist or use NSE:SYMBOL.' });
+    if (isRealtimeConfigured()) {
+      const bars = await getHistoricalBars(symbol, range);
+      if (bars && bars.length > 0) {
+        return res.json({ symbol, interval, range, data: bars });
       }
-      const kc = getKiteForMarket();
-      const fromStr = formatKiteDateTime(from);
-      const toStr = formatKiteDateTime(to);
-      const candles = await kc.getHistoricalData(token, interval, fromStr, toStr, false, false);
-      const data = (Array.isArray(candles) ? candles : []).map((c) => ({
-        time: new Date(c.date).getTime() / 1000,
-        open: Number(c.open),
-        high: Number(c.high),
-        low: Number(c.low),
-        close: Number(c.close),
-        volume: c.volume != null ? Number(c.volume) : undefined,
-      }));
-      return res.json({ symbol, interval, range, data });
     }
 
-    // Fallback: Yahoo Finance for real chart data without Kite
     const yahooSymbol = toYahooSymbol(symbol.includes(':') ? symbol : toKiteInstrumentKey(symbol) || symbol);
     if (!yahooSymbol) {
       return res.status(400).json({ error: 'Unsupported symbol for chart.' });
@@ -613,7 +606,7 @@ router.get('/candles', async (req, res) => {
         close: Number(c.close),
         volume: c.volume != null ? Number(c.volume) : undefined,
       }));
-    if (data.length > 0) console.log('[candles] Yahoo fallback returned', data.length, 'candles for', yahooSymbol);
+    if (data.length > 0) console.log('[candles] Yahoo returned', data.length, 'candles for', yahooSymbol);
     res.json({ symbol, interval, range, data });
   } catch (err) {
     console.error('Error fetching candles', err?.message || err);

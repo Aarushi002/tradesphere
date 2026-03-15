@@ -72,3 +72,18 @@ Access tokens expire daily. You can refresh without editing `.env`:
 So you only need to click **Refresh Kite session** once per day (e.g. at market open) instead of copying tokens manually.
 
 **Note:** This app is for **paper/simulated trading**. Real brokerage like Zerodha requires their API terms, KYC, and compliance. TradeSphere does not execute real orders on exchanges.
+
+## Live tick-by-tick data (TrueData, paid)
+
+For **real-time** NSE/BSE prices and charts (no daily token refresh), you can use [TrueData](https://www.truedata.in/products/marketdataapi) as an authorised market data provider.
+
+1. **Sign up** at [TrueData Market Data API](https://www.truedata.in/products/marketdataapi) and get trial/paid credentials.
+2. **Add to `backend/.env`** (or your host’s env):
+   ```env
+   TRUEDATA_USER=your_username
+   TRUEDATA_PASSWORD=your_password
+   TRUEDATA_PORT=8082
+   ```
+3. **Restart the backend.** It will connect to TrueData’s WebSocket and cache live ticks. Quotes and charts will use this feed when connected; otherwise the app falls back to Yahoo Finance (delayed).
+
+No Zerodha API or token is required when using TrueData. Option chain and market depth still use Zerodha if configured.

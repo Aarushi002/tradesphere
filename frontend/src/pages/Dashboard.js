@@ -161,6 +161,7 @@ export default function Dashboard({ user, onLogout, darkMode, onToggleDarkMode }
   const [indices, setIndices] = useState([]);
   const [quotes, setQuotes] = useState({});
   const [quotesFromLiveApi, setQuotesFromLiveApi] = useState(false); // true when last successful quotes response had real data
+  const [dataFeedLive, setDataFeedLive] = useState(false); // true when TrueData WebSocket connected (live tick feed)
   const [quotesApiUnavailable, setQuotesApiUnavailable] = useState(false); // true when backend returns 503 (Kite not configured)
   const [kiteRefreshMessage, setKiteRefreshMessage] = useState(null); // 'success' | error string after redirect from Kite callback
   const [kiteAutoConnecting, setKiteAutoConnecting] = useState(false); // true when redirecting to Kite to enable live data (no manual "Connect Kite" step)
@@ -488,6 +489,19 @@ export default function Dashboard({ user, onLogout, darkMode, onToggleDarkMode }
     // eslint-disable-next-line react-hooks/exhaustive-deps -- refetch when watchlist symbols or market hours change
   }, [watchlist.length, watchlist.join(','), marketLive]);
 
+  // Poll realtime feed status (TrueData connected = live; else delayed Yahoo)
+  useEffect(() => {
+    const check = () => {
+      fetch(`${API_URL}/api/market/realtime-status`)
+        .then((res) => res.ok ? res.json() : Promise.reject())
+        .then((json) => setDataFeedLive(Boolean(json?.live)))
+        .catch(() => setDataFeedLive(false));
+    };
+    check();
+    const id = setInterval(check, 30000);
+    return () => clearInterval(id);
+  }, []);
+
   useEffect(() => {
     const token = getToken();
     if (!token) return;
@@ -579,9 +593,14 @@ export default function Dashboard({ user, onLogout, darkMode, onToggleDarkMode }
       })
       .catch((err) => {
         setCandles([]);
-        setChartError(err?.status === 503 || /market data unavailable|link your zerodha|kite session/i.test(String(err?.message || ''))
+        const msg = String(err?.message || '');
+        const isKiteAuth = /api_key|access_token|authentication failed/i.test(msg);
+        if (isKiteAuth) setQuotesApiUnavailable(true);
+        setChartError(err?.status === 503 || /market data unavailable|link your zerodha|kite session/i.test(msg)
           ? 'Market data unavailable. Administrator: connect Kite once to enable live charts for everyone.'
-          : (err?.message || 'Could not load chart. Connect Kite for real data.'));
+          : isKiteAuth
+            ? 'Live data requires Kite to be connected. Click "Enable live data" below.'
+            : (msg || 'Could not load chart. Connect Kite for real data.'));
       })
       .finally(() => setChartLoading(false));
   }, [symbol, chartRange, chartRefreshTick]);
@@ -745,8 +764,11 @@ export default function Dashboard({ user, onLogout, darkMode, onToggleDarkMode }
         <div className="flex items-center gap-1 sm:gap-2 min-w-0 flex-1 overflow-hidden">
           <button type="button" onClick={() => setSidebarOpen((o) => !o)} className="lg:hidden p-2 -ml-1 rounded hover:bg-gray-100 dark:hover:bg-slate-700 touch-manipulation flex-shrink-0" aria-label="Toggle watchlist">☰</button>
           <div className="hidden sm:flex items-center gap-2 md:gap-3 overflow-x-auto scrollbar-hide shrink-0">
-            {quotesFromLiveApi && (
-              <span className="text-[10px] sm:text-xs text-green-600 dark:text-green-400 font-medium shrink-0" title="Real-time data from Kite">Live</span>
+            {dataFeedLive && (
+              <span className="text-[10px] sm:text-xs text-green-600 dark:text-green-400 font-medium shrink-0" title="Live tick data (TrueData)">Live</span>
+            )}
+            {!dataFeedLive && indices.length > 0 && (
+              <span className="text-[10px] sm:text-xs text-gray-500 dark:text-slate-400 shrink-0" title="Free feed, typically 15–20 min delayed">Delayed (~15 min)</span>
             )}
             {quotesApiUnavailable && !kiteAutoConnecting && (
               <span className="text-[10px] sm:text-xs text-amber-600 dark:text-amber-400 shrink-0" title="Live data is being set up">Enabling…</span>
@@ -1220,7 +1242,8 @@ export default function Dashboard({ user, onLogout, darkMode, onToggleDarkMode }
           </div>
           <div className="px-2 flex items-center justify-between gap-1">
             <span className="text-[11px] font-medium text-gray-500 dark:text-slate-500 uppercase tracking-wide">{activeGroup?.name ?? 'Default'} ({watchlist.length})</span>
-            {quotesFromLiveApi && <span className="text-[10px] text-green-600 dark:text-green-400 font-medium">Live</span>}
+            {dataFeedLive && <span className="text-[10px] text-green-600 dark:text-green-400 font-medium">Live</span>}
+            {!dataFeedLive && watchlist.length > 0 && <span className="text-[10px] text-gray-500 dark:text-slate-400">Delayed</span>}
             {quotesApiUnavailable && !kiteAutoConnecting && <span className="text-[10px] text-amber-600 dark:text-amber-400">Enabling…</span>}
           </div>
           <ul className="flex-1 overflow-auto min-h-0 text-sm">
@@ -1337,8 +1360,13 @@ export default function Dashboard({ user, onLogout, darkMode, onToggleDarkMode }
                       </div>
                     )}
                     {!chartLoading && candles.length === 0 && chartError ? (
-                      <div className={`absolute inset-0 flex items-center justify-center ${darkMode ? 'bg-slate-900 text-slate-300' : 'bg-gray-50 text-gray-600'}`}>
+                      <div className={`absolute inset-0 flex flex-col items-center justify-center gap-3 ${darkMode ? 'bg-slate-900 text-slate-300' : 'bg-gray-50 text-gray-600'}`}>
                         <p className="text-sm text-center px-4 max-w-md">{chartError}</p>
+                        {/live data|kite|api_key|access_token/i.test(chartError) && (
+                          <button type="button" onClick={() => { setKiteSetupOpen(true); if (!kiteRedirectUrl) fetch(`${API_URL}/api/kite/setup`).then((r) => r.json()).then((d) => d.redirectUrlToAddInKite && setKiteRedirectUrl(d.redirectUrlToAddInKite)); }} className="px-4 py-2 rounded-lg font-semibold text-white bg-blue-600 hover:bg-blue-700">
+                            Enable live data
+                          </button>
+                        )}
                       </div>
                     ) : (
                       <PriceChart data={candles} darkMode={darkMode} lastPrice={chartLtp} />
@@ -1458,8 +1486,13 @@ export default function Dashboard({ user, onLogout, darkMode, onToggleDarkMode }
                             </div>
                           )}
                           {!chartLoading && candles.length === 0 && chartError ? (
-                            <div className={`absolute inset-0 flex items-center justify-center rounded ${darkMode ? 'bg-slate-900 text-slate-300' : 'bg-gray-100 text-gray-600'}`}>
+                            <div className={`absolute inset-0 flex flex-col items-center justify-center gap-3 rounded ${darkMode ? 'bg-slate-900 text-slate-300' : 'bg-gray-100 text-gray-600'}`}>
                               <p className="text-sm text-center px-4 max-w-md">{chartError}</p>
+                              {/live data|kite|api_key|access_token/i.test(chartError) && (
+                                <button type="button" onClick={() => { setKiteSetupOpen(true); if (!kiteRedirectUrl) fetch(`${API_URL}/api/kite/setup`).then((r) => r.json()).then((d) => d.redirectUrlToAddInKite && setKiteRedirectUrl(d.redirectUrlToAddInKite)); }} className="px-4 py-2 rounded-lg font-semibold text-white bg-blue-600 hover:bg-blue-700">
+                                  Enable live data
+                                </button>
+                              )}
                             </div>
                           ) : (
                             <PriceChart data={candles} darkMode={darkMode} />

@@ -9,6 +9,9 @@ app.use(express.json());
 app.use(morgan('dev'));
 
 // Minimal routes first — no DB or heavy imports so the server always starts and Render marks it "live"
+app.get('/', (req, res) => {
+  res.status(200).send('OK');
+});
 app.get('/api/health', (req, res) => {
   res.json({ status: 'ok', service: 'tradesphere-backend' });
 });
@@ -67,6 +70,9 @@ async function loadRest() {
   } catch (err) {
     console.error('MongoDB connection failed:', err.message);
   }
+
+  const { startRealtime } = await import('./lib/realtimeData.js');
+  if (typeof startRealtime === 'function') startRealtime();
 }
 
 loadRest().catch((err) => {
