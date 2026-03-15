@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
+import ReactDOM from 'react-dom';
 import { formatINR, formatINRCompact } from '../utils/currency';
 import PriceChart from '../components/PriceChart';
 import AutoTrading from './AutoTrading';
@@ -208,6 +209,21 @@ export default function Dashboard({ user, onLogout, darkMode, onToggleDarkMode }
   useEffect(() => setWatchlistPage(1), [watchlistGroups.activeId]);
   const [showRiskDisclosure, setShowRiskDisclosure] = useState(() => !sessionStorage.getItem('tradesphere_risk_ack'));
   const [watchlistOptionsOpen, setWatchlistOptionsOpen] = useState(null); // symbol key or null
+  const watchlistMenuButtonRef = useRef(null);
+  const [watchlistMenuPosition, setWatchlistMenuPosition] = useState(null); // { top, left } for portal dropdown
+  useEffect(() => {
+    if (!watchlistOptionsOpen) {
+      setWatchlistMenuPosition(null);
+      return;
+    }
+    const t = requestAnimationFrame(() => {
+      const el = watchlistMenuButtonRef.current;
+      if (!el) return;
+      const rect = el.getBoundingClientRect();
+      setWatchlistMenuPosition({ top: rect.bottom + 4, left: rect.left });
+    });
+    return () => cancelAnimationFrame(t);
+  }, [watchlistOptionsOpen]);
   const [optionChainSymbol, setOptionChainSymbol] = useState(null);
   const [optionChainData, setOptionChainData] = useState(null);
   const [optionChainLoading, setOptionChainLoading] = useState(false);
@@ -1557,19 +1573,14 @@ export default function Dashboard({ user, onLogout, darkMode, onToggleDarkMode }
                     <button type="button" onClick={() => { setSymbol(s); setOrderModalSide('SELL'); setOrderType('MARKET'); setOrderPrice(''); setOrderModalOpen(true); setMainNav('dashboard'); setChartFullScreen(false); setSidebarOpen(false); }} className="w-7 h-7 sm:w-8 sm:h-8 flex items-center justify-center rounded text-white font-semibold text-sm bg-orange-500 hover:bg-orange-600 touch-manipulation shrink-0" title="Sell">S</button>
                     <button type="button" onClick={() => { setSymbol(s); setChartFullScreen(true); setWatchlistOptionsOpen(null); setMainNav('dashboard'); setSidebarOpen(false); }} className="w-7 h-7 sm:w-8 sm:h-8 flex items-center justify-center rounded border border-gray-300 dark:border-slate-600 bg-white dark:bg-slate-700 hover:bg-gray-100 dark:hover:bg-slate-600 touch-manipulation shrink-0" title="Chart">📈</button>
                     <div className="relative">
-                      <button type="button" onClick={() => setWatchlistOptionsOpen(optionsOpen ? null : s)} className="w-7 h-7 sm:w-8 sm:h-8 flex items-center justify-center rounded border border-gray-300 dark:border-slate-600 bg-white dark:bg-slate-700 hover:bg-gray-100 dark:hover:bg-slate-600 touch-manipulation shrink-0 text-gray-700 dark:text-slate-200" title="Menu" aria-label="Options">☰</button>
-                      {optionsOpen && (
-                        <div className={`absolute left-0 top-full mt-0.5 z-30 min-w-[160px] py-1 rounded border shadow-lg ${darkMode ? 'bg-slate-800 border-slate-600' : 'bg-white border-gray-200'}`}>
-                          <button type="button" onClick={() => { setOptionChainExpiry(null); setOptionChainSymbol(s); setWatchlistOptionsOpen(null); }} className="w-full text-left px-3 py-1.5 text-xs hover:bg-gray-100 dark:hover:bg-slate-700">Option chain</button>
-                          <button type="button" onClick={() => { setMarketDepthSymbol(s); setWatchlistOptionsOpen(null); }} className="w-full text-left px-3 py-1.5 text-xs hover:bg-gray-100 dark:hover:bg-slate-700">Market depth</button>
-                          <button type="button" onClick={() => { setSymbol(s); setChartFullScreen(true); setWatchlistOptionsOpen(null); setMainNav('dashboard'); setSidebarOpen(false); }} className="w-full text-left px-3 py-1.5 text-xs hover:bg-gray-100 dark:hover:bg-slate-700">Chart</button>
-                          <button type="button" className="w-full text-left px-3 py-1.5 text-xs hover:bg-gray-100 dark:hover:bg-slate-700">Create alert / ATO</button>
-                          <button type="button" className="w-full text-left px-3 py-1.5 text-xs hover:bg-gray-100 dark:hover:bg-slate-700">Notes</button>
-                          <button type="button" className="w-full text-left px-3 py-1.5 text-xs hover:bg-gray-100 dark:hover:bg-slate-700">Fundamentals</button>
-                          <button type="button" className="w-full text-left px-3 py-1.5 text-xs hover:bg-gray-100 dark:hover:bg-slate-700">Technicals</button>
-                          <button type="button" onClick={() => { removeFromWatchlist(s); setWatchlistOptionsOpen(null); }} className="w-full text-left px-3 py-1.5 text-xs text-red-600 dark:text-red-400 hover:bg-gray-100 dark:hover:bg-slate-700">Remove from watchlist</button>
-                        </div>
-                      )}
+                      <button
+                        type="button"
+                        ref={optionsOpen ? watchlistMenuButtonRef : undefined}
+                        onClick={() => setWatchlistOptionsOpen(optionsOpen ? null : s)}
+                        className="w-7 h-7 sm:w-8 sm:h-8 flex items-center justify-center rounded border border-gray-300 dark:border-slate-600 bg-white dark:bg-slate-700 hover:bg-gray-100 dark:hover:bg-slate-600 touch-manipulation shrink-0 text-gray-700 dark:text-slate-200"
+                        title="Menu"
+                        aria-label="Options"
+                      >☰</button>
                     </div>
                     <button type="button" onClick={() => { setSymbol(s); setOrderModalSide('BUY'); setOrderType('MARKET'); setOrderPrice(''); setOrderModalOpen(true); setMainNav('dashboard'); setChartFullScreen(false); setSidebarOpen(false); }} className="w-7 h-7 sm:w-8 sm:h-8 flex items-center justify-center rounded text-white font-semibold text-lg leading-none bg-green-600 hover:bg-green-700 touch-manipulation shrink-0" title="Quick buy">+</button>
                   </div>
@@ -1577,6 +1588,26 @@ export default function Dashboard({ user, onLogout, darkMode, onToggleDarkMode }
               );
             })}
           </ul>
+          {watchlistMenuPosition && watchlistOptionsOpen && ReactDOM.createPortal(
+            <>
+              <div className="fixed inset-0 z-[60]" aria-hidden="true" onClick={() => setWatchlistOptionsOpen(null)} />
+              <div
+                className={`fixed z-[61] min-w-[200px] max-w-[90vw] py-1 rounded border shadow-lg whitespace-nowrap ${darkMode ? 'bg-slate-800 border-slate-600' : 'bg-white border-gray-200'}`}
+                style={{ top: watchlistMenuPosition.top, left: watchlistMenuPosition.left }}
+                role="menu"
+              >
+                <button type="button" onClick={() => { setOptionChainExpiry(null); setOptionChainSymbol(watchlistOptionsOpen); setWatchlistOptionsOpen(null); }} className="w-full text-left px-3 py-1.5 text-xs hover:bg-gray-100 dark:hover:bg-slate-700" role="menuitem">Option chain</button>
+                <button type="button" onClick={() => { setMarketDepthSymbol(watchlistOptionsOpen); setWatchlistOptionsOpen(null); }} className="w-full text-left px-3 py-1.5 text-xs hover:bg-gray-100 dark:hover:bg-slate-700" role="menuitem">Market depth</button>
+                <button type="button" onClick={() => { setSymbol(watchlistOptionsOpen); setChartFullScreen(true); setWatchlistOptionsOpen(null); setMainNav('dashboard'); setSidebarOpen(false); }} className="w-full text-left px-3 py-1.5 text-xs hover:bg-gray-100 dark:hover:bg-slate-700" role="menuitem">Chart</button>
+                <button type="button" className="w-full text-left px-3 py-1.5 text-xs hover:bg-gray-100 dark:hover:bg-slate-700" role="menuitem">Create alert / ATO</button>
+                <button type="button" className="w-full text-left px-3 py-1.5 text-xs hover:bg-gray-100 dark:hover:bg-slate-700" role="menuitem">Notes</button>
+                <button type="button" className="w-full text-left px-3 py-1.5 text-xs hover:bg-gray-100 dark:hover:bg-slate-700" role="menuitem">Fundamentals</button>
+                <button type="button" className="w-full text-left px-3 py-1.5 text-xs hover:bg-gray-100 dark:hover:bg-slate-700" role="menuitem">Technicals</button>
+                <button type="button" onClick={() => { removeFromWatchlist(watchlistOptionsOpen); setWatchlistOptionsOpen(null); }} className="w-full text-left px-3 py-1.5 text-xs text-red-600 dark:text-red-400 hover:bg-gray-100 dark:hover:bg-slate-700" role="menuitem">Remove from watchlist</button>
+              </div>
+            </>,
+            document.body
+          )}
           <div className="p-2 flex items-center justify-between gap-1 border-t border-gray-200 dark:border-slate-700">
             <div className="flex items-center gap-0.5">
               {Array.from({ length: Math.min(7, watchlistPageCount) }, (_, i) => i + 1).map((p) => (
