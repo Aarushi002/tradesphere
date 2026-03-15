@@ -4,7 +4,11 @@ import cors from 'cors';
 import morgan from 'morgan';
 
 const app = express();
-app.use(cors());
+const corsOrigins = (process.env.FRONTEND_URL || process.env.CORS_ORIGIN || '')
+  .split(',')
+  .map((s) => s.trim())
+  .filter(Boolean);
+app.use(cors(corsOrigins.length ? { origin: corsOrigins } : {}));
 app.use(express.json());
 app.use(morgan('dev'));
 
